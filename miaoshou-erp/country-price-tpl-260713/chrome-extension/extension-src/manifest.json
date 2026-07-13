@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "妙手多国申报价工具",
+  "version": "1.0",
+  "description": "一键管理并批量套用按国家区分的申报价模板",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "妙手多国申报价工具 — 点击打开模板管理面板",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
