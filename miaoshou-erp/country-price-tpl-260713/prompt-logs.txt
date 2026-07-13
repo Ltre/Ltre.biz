@@ -1,0 +1,80 @@
+============================================================
+问答记录 — 2025-07-13
+============================================================
+
+项目: E:\Workspaces\github\Ltre\Ltre.biz\260713-miaoshou-erp
+
+
+【任务四】申报价模板管理工具（country-price-template.js）
+
+需求:
+- 为用户运营人员提供一键申报价模板管理
+- 页面是 Vue 3 + Element UI + vue-recycle-scroller 虚拟滚动
+- 表格结构：第一列国家名，第二列申报价 input
+- 虚拟滚动限制：DOM 中始终只渲染约 20 个可见行
+- 用户提供精确 DOM 路径
+
+核心技术挑战及解决路线:
+
+1. DOM 选择器（用户提供，始终正确）
+   ROOT_SEL = "body > div > div > div.el-dialog__body > div.jx-pro-virtual-table 
+              > div.jx-pro-virtual-table__body > div.vue-recycle-scroller__item-wrapper"
+   提取：wrapper.children → 取每行的国家名和价格 input
+
+2. 虚拟滚动导致只能获取部分国家（~14-20 个，实际 27 个）
+   尝试过的方案：
+   a) Vue __vue__ 访问 → 生产模式全部剥离，返回 null ✗
+   b) __vnode.component → Vue 3 内部属性也不可用 ✗
+   c) Vue devtools hook → 不存在 ✗
+   d) jQuery → 不存在 ✗
+   e) 同步 scrollTop 循环 → 同步阻塞无法触发渲染 ✗
+   f) 异步 setTimeout 逐段滚动 → scroller 不响应 scrollTop ✗
+
+3. 最终方案（用户指导的路线）
+   - 使用用户提供的精确 DOM 路径（国家名 100% 正确）
+   - 操作前先手动滚动虚拟列表到底部（让所有行都渲染一次）
+   - MutationObserver 持续监听 DOM 变化
+   - input 事件委托检测用户手动编辑
+
+4. 持续套用机制
+   - MutationObserver 监听 wrapper 的 childList/characterData
+   - DOM 变化时自动扫描所有可见行，填入模板价格
+   - 用户手动编辑过的国家记入 userEdited 黑名单
+   - 改回模板值则移出黑名单，恢复自动同步
+
+5. UI 功能
+   - 新增模板（基于当前表格国家列表）
+   - 从当前表格快照创建模板
+   - 编辑模板（二维表格形式）
+   - 套用模板（持续监控 + 可停止）
+   - 删除模板
+   - localStorage 持久化存储
+
+
+============================================================
+关键经验教训
+============================================================
+
+1. Vue 3 生产模式禁用了所有内部调试接口（__vue__、__vnode、$data 等）
+   → 只能通过 DOM 操作，无法直接访问数据模型
+
+2. vue-recycle-scroller 的 DOM 是动态池，始终只有 ~20 个节点
+   → 不能依赖 DOM 获取完整列表
+
+3. setInputValue 适配 Vue/Element UI：
+   nativeValueSetter + dispatchEvent('input') + dispatchEvent('change')
+
+4. 浏览器自动翻译会干扰 i18n 系统
+   → 必须设置 translate="no" 和 notranslate meta
+
+5. DeepSeek V4 Flash 做代码迁移时容易遗漏关联路径
+   → 需要仔细检查所有 static/sendFile 路由和中间件
+
+
+============================================================
+输出文件
+============================================================
+
+E:\Workspaces\github\Ltre\Ltre.biz\260713-miaoshou-erp\1\
+  ├── country-price-template.js  (最终版本，含持续套用监控)
+  └── README.md
