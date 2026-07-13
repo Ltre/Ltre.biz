@@ -1,71 +1,152 @@
 javascript:(function(){
 'use strict';
 
-// ==================== DOM 读取 ====================
+// ==================== DOM 选择器 ====================
 const ROOT_SEL = "body > div > div > div.el-dialog__body > div.jx-pro-virtual-table > div.jx-pro-virtual-table__body > div.vue-recycle-scroller__item-wrapper";
 
-function getLines() {
-  const wrapper = document.querySelector(ROOT_SEL);
-  if (!wrapper) throw new Error('找不到申报价表格，请确认弹窗已打开');
-  return [...wrapper.children];
+function getWrapper() {
+  const w = document.querySelector(ROOT_SEL);
+  if (!w) throw new Error('找不到申报价表格，请确认弹窗已打开');
+  return w;
 }
 
-function extractCountryPrice(line) {
-  const name = (line.children[0]?.children[0]?.children[0]?.textContent || '').trim();
-  const input = line.children[0]?.children[0]?.children[1]?.children[0]?.querySelector('input');
+function extractRow(rowEl) {
+  const cell0 = rowEl.children[0]?.children[0]?.children[0];
+  const name = (cell0?.textContent || '').trim();
+  const input = rowEl.children[0]?.children[0]?.children[1]?.querySelector('input');
   return { name, input, price: input ? input.value.trim() : '' };
 }
 
-function getCurrentSnapshot() {
-  return getLines().map(extractCountryPrice);
-}
+// ==================== 收集全部国家（异步滚动） ====================
+function collectAllCountries(callback) {
+  const wrapper = getWrapper();
+  const scroller = wrapper.parentElement; // vue-recycle-scroller
+  const minH = parseInt(wrapper.style.minHeight) || 0;
+  const visibleH = scroller.clientHeight || 400;
 
-function getCountries() {
-  return getCurrentSnapshot().map(c => c.name);
+  if (minH < 100) {
+    // fallback: just use visible rows
+    const cs = {};
+    wrapper.querySelectorAll('.vue-recycle-scroller__item-view').forEach(function(iv){
+      const row = extractRow(iv);
+      if (row.name) cs[row.name] = true;
+    });
+    callback(Object.keys(cs));
+    return;
+  }
+
+  const seen = {};
+  let offset = 0;
+  const origScroll = scroller.scrollTop;
+
+  function step() {
+    scroller.scrollTop = offset;
+    // 用双重 setTimeout 确保虚拟滚动完成 DOM 更新
+    setTimeout(function() {
+      setTimeout(function() {
+        wrapper.querySelectorAll('.vue-recycle-scroller__item-view').forEach(function(iv){
+          const row = extractRow(iv);
+          if (row.name && /[\u4e00-\u9fff]/.test(row.name)) seen[row.name] = true;
+        });
+
+        offset += Math.floor(visibleH * 0.8); // 80% 重叠确保不漏
+        if (offset >= minH || Object.keys(seen).length >= Math.floor(minH / 50)) {
+          // 完成，恢复原位
+          scroller.scrollTop = origScroll;
+          callback(Object.keys(seen));
+        } else {
+          step();
+        }
+      }, 80);
+    }, 80);
+  }
+
+  step();
 }
 
 // ==================== 模板存储 ====================
 const STORAGE_KEY = 'hermes_country_price_templates';
+function loadTemplates() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch(e) { return []; } }
+function saveTemplates(arr) { localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); }
 
-function loadTemplates() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-  catch { return []; }
-}
-function saveTemplates(arr) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
-}
-
-// ==================== Input 安全写入 (适配 Vue) ====================
+// ==================== Input 安全写入 ====================
 const nativeValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-
 function setInputValue(input, value) {
   nativeValueSetter.call(input, value);
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-// ==================== 套用模板 ====================
-function applyTemplate(template) {
-  const countries = getCountries();
-  const lines = getLines();
-  const priceMap = {};
-  template.prices.forEach(p => { priceMap[p.country.trim()] = p.price; });
+// ==================== 持续套用监控 ====================
+let activeTemplate = null;       // { name, priceMap }
+let userEdited = {};             // { countryName: true }
 
-  let applied = 0;
-  const curSnapshot = getCurrentSnapshot();
-  curSnapshot.forEach((snap, idx) => {
-    const key = snap.name;
-    if (priceMap[key] !== undefined && snap.input) {
-      setInputValue(snap.input, priceMap[key]);
-      applied++;
+/** 对可见行填一次 */
+function fillVisibleRows(priceMap) {
+  let filled = 0;
+  const wrapper = getWrapper();
+  wrapper.querySelectorAll('.vue-recycle-scroller__item-view').forEach(function(iv){
+    const row = extractRow(iv);
+    if (row.input && priceMap[row.name] !== undefined && !userEdited[row.name]) {
+      setInputValue(row.input, priceMap[row.name]);
+      filled++;
     }
   });
-
-  return applied;
+  return filled;
 }
 
-// ==================== UI 构建 ====================
-// 注入样式
+function startMonitoring(template) {
+  stopMonitoring();
+  activeTemplate = template;
+  userEdited = {};
+
+  const wrapper = getWrapper();
+  fillVisibleRows(template.priceMap);
+
+  // MutationObserver：监听 wrapper 子节点增删 + 文本变化
+  wrapper.__hcmObserver = new MutationObserver(function(){
+    wrapper.querySelectorAll('.vue-recycle-scroller__item-view').forEach(function(iv){
+      const row = extractRow(iv);
+      if (!row.input || !template.priceMap[row.name] || userEdited[row.name]) return;
+      if (row.price !== template.priceMap[row.name]) {
+        setInputValue(row.input, template.priceMap[row.name]);
+      }
+    });
+  });
+  wrapper.__hcmObserver.observe(wrapper, { childList: true, subtree: true, characterData: true });
+
+  // input 事件委托：用户手动改过的记入黑名单
+  wrapper.__hcmInputHandler = function(e){
+    if (e.target.tagName !== 'INPUT') return;
+    const iv = e.target.closest('.vue-recycle-scroller__item-view');
+    if (!iv) return;
+    const row = extractRow(iv);
+    if (!row.name) return;
+    if (activeTemplate && activeTemplate.priceMap[row.name] === e.target.value) {
+      delete userEdited[row.name];
+    } else {
+      userEdited[row.name] = true;
+    }
+  };
+  wrapper.addEventListener('input', wrapper.__hcmInputHandler, true);
+}
+
+function stopMonitoring() {
+  const wrapper = getWrapper();
+  if (wrapper.__hcmObserver) { wrapper.__hcmObserver.disconnect(); delete wrapper.__hcmObserver; }
+  if (wrapper.__hcmInputHandler) { wrapper.removeEventListener('input', wrapper.__hcmInputHandler, true); delete wrapper.__hcmInputHandler; }
+  activeTemplate = null;
+  userEdited = {};
+}
+
+function applyTemplate(template) {
+  const priceMap = {};
+  template.prices.forEach(function(p){ priceMap[p.country.trim()] = p.price; });
+  startMonitoring({ name: template.name, priceMap: priceMap });
+  return Object.keys(priceMap).length;
+}
+
+// ==================== UI ====================
 const style = document.createElement('style');
 style.textContent = `
 .hcm-overlay-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center}
@@ -103,26 +184,20 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-// Toast
 let toastTimer;
-function toast(msg, type = '') {
+function toast(msg, type) {
+  type = type || '';
   let el = document.getElementById('hcm-toast');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'hcm-toast';
-    el.className = 'hcm-toast';
-    document.body.appendChild(el);
-  }
+  if (!el) { el = document.createElement('div'); el.id = 'hcm-toast'; el.className = 'hcm-toast'; document.body.appendChild(el); }
   el.textContent = msg;
   el.style.background = type === 'error' ? '#e74c3c' : '#333';
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+  toastTimer = setTimeout(function(){ el.classList.remove('show'); }, 2000);
 }
 
-// ==================== 面板渲染 ====================
-let currentView = 'list'; // 'list' | 'edit'
-let editingIndex = -1;
+// ==================== 面板 ====================
+let currentView = 'list', editingIndex = -1, allCountries = [];
 
 function destroyPanel() {
   const bg = document.getElementById('hcm-overlay');
@@ -132,244 +207,181 @@ function destroyPanel() {
 function render() {
   destroyPanel();
   const templates = loadTemplates();
-
   const bg = document.createElement('div');
-  bg.id = 'hcm-overlay';
-  bg.className = 'hcm-overlay-bg';
-  bg.onclick = (e) => { if (e.target === bg) destroyPanel(); };
-
+  bg.id = 'hcm-overlay'; bg.className = 'hcm-overlay-bg';
+  bg.onclick = function(e){ if(e.target===bg) destroyPanel(); };
   const panel = document.createElement('div');
   panel.className = 'hcm-panel';
-  panel.onclick = (e) => e.stopPropagation();
+  panel.onclick = function(e){ e.stopPropagation(); };
 
-  // Header
   const header = document.createElement('div');
   header.className = 'hcm-header';
-  header.innerHTML = `<h3>${currentView === 'edit' ? (editingIndex >= 0 ? '编辑模板' : '新建模板') : '申报价模板管理'}</h3>`;
+  header.innerHTML = '<h3>' + (currentView==='edit'?(editingIndex>=0?'编辑模板':'新建模板'):'申报价模板管理') + '</h3>';
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'hcm-close';
-  closeBtn.textContent = '✕';
-  closeBtn.onclick = destroyPanel;
+  closeBtn.className = 'hcm-close'; closeBtn.textContent = '\u2715'; closeBtn.onclick = destroyPanel;
   header.appendChild(closeBtn);
 
-  // Body
   const body = document.createElement('div');
   body.className = 'hcm-body';
+  body.appendChild(currentView==='list' ? renderListView(templates) : renderEditView(templates));
 
-  if (currentView === 'list') {
-    body.appendChild(renderListView(templates));
-  } else {
-    body.appendChild(renderEditView(templates));
-  }
-
-  panel.appendChild(header);
-  panel.appendChild(body);
-  bg.appendChild(panel);
-  document.body.appendChild(bg);
+  panel.appendChild(header); panel.appendChild(body);
+  bg.appendChild(panel); document.body.appendChild(bg);
 }
 
 function renderListView(templates) {
   const frag = document.createDocumentFragment();
-
-  // Toolbar
   const toolbar = document.createElement('div');
   toolbar.className = 'hcm-toolbar';
 
   const addBtn = document.createElement('button');
   addBtn.className = 'hcm-btn hcm-btn-primary';
   addBtn.textContent = '+ 新增模板';
-  addBtn.onclick = () => {
+  addBtn.onclick = function(){
     const name = prompt('请输入模板名称：');
-    if (!name || !name.trim()) return;
-    const countries = getCountries();
-    if (countries.length === 0) { toast('当前表格没有数据', 'error'); return; }
-    editingIndex = -1;
-    currentView = 'edit';
-    // 暂存新建模板数据
-    window.__hcm_new_template = { name: name.trim(), prices: countries.map(c => ({ country: c, price: '' })) };
+    if(!name||!name.trim()) return;
+    editingIndex=-1; currentView='edit';
+    window.__hcm_new_template={name:name.trim(),prices:allCountries.map(function(c){return{country:c,price:''};})};
     render();
   };
   toolbar.appendChild(addBtn);
 
-  const snapshotBtn = document.createElement('button');
-  snapshotBtn.className = 'hcm-btn';
-  snapshotBtn.textContent = '📋 从当前表格创建模板';
-  snapshotBtn.onclick = () => {
+  const snapBtn = document.createElement('button');
+  snapBtn.className = 'hcm-btn';
+  snapBtn.textContent = '\uD83D\uDCCB 从当前表格创建模板';
+  snapBtn.onclick = function(){
     const name = prompt('请输入模板名称：');
-    if (!name || !name.trim()) return;
-    const snapshot = getCurrentSnapshot();
-    if (snapshot.length === 0) { toast('当前表格没有数据', 'error'); return; }
-    const templates = loadTemplates();
-    templates.push({ name: name.trim(), prices: snapshot.map(s => ({ country: s.name, price: s.price })), updatedAt: new Date().toISOString() });
-    saveTemplates(templates);
-    toast('模板已保存');
-    render();
+    if(!name||!name.trim()) return;
+    const wrapper = getWrapper();
+    const ss = [];
+    wrapper.querySelectorAll('.vue-recycle-scroller__item-view').forEach(function(iv){ ss.push(extractRow(iv)); });
+    const tpls = loadTemplates();
+    tpls.push({name:name.trim(),prices:ss.filter(function(r){return r.name;}).map(function(r){return{country:r.name,price:r.price};}),updatedAt:new Date().toISOString()});
+    saveTemplates(tpls); toast('模板已保存'); render();
   };
-  toolbar.appendChild(snapshotBtn);
-
+  toolbar.appendChild(snapBtn);
   frag.appendChild(toolbar);
 
-  // Template list
-  if (templates.length === 0) {
+  // 活跃模板状态条
+  if (activeTemplate) {
+    const statusBar = document.createElement('div');
+    statusBar.style.cssText = 'padding:8px 14px;background:#ecf5ff;border:1px solid #b3d8ff;border-radius:6px;margin-bottom:12px;font-size:13px;display:flex;align-items:center;justify-content:space-between';
+    statusBar.innerHTML = '<span>\uD83D\uDD04 正在套用: <b>' + escHtml(activeTemplate.name) + '</b>（已禁止编辑 ' + Object.keys(userEdited).length + ' 国）</span>';
+    const stopBtn = document.createElement('button');
+    stopBtn.className = 'hcm-btn hcm-btn-danger hcm-btn-sm';
+    stopBtn.textContent = '停止套用';
+    stopBtn.onclick = function(){ stopMonitoring(); toast('已停止套用'); render(); };
+    statusBar.appendChild(stopBtn);
+    frag.appendChild(statusBar);
+  }
+
+  if(templates.length===0){
     const empty = document.createElement('div');
-    empty.className = 'hcm-empty';
-    empty.textContent = '暂无模板，点击上方按钮创建';
+    empty.className = 'hcm-empty'; empty.textContent = '暂无模板';
     frag.appendChild(empty);
-  } else {
+  }else{
     const list = document.createElement('div');
     list.className = 'hcm-template-list';
-
-    templates.forEach((tpl, idx) => {
+    templates.forEach(function(tpl,idx){
       const item = document.createElement('div');
       item.className = 'hcm-template-item';
-
       const info = document.createElement('div');
       info.className = 'hcm-tpl-info';
-      info.innerHTML = `<span class="hcm-tpl-name">${escHtml(tpl.name)}</span><span class="hcm-tpl-meta">${tpl.prices.length} 个国家 · ${tpl.updatedAt ? '更新于 ' + new Date(tpl.updatedAt).toLocaleString() : ''}</span>`;
-
+      info.innerHTML = '<span class="hcm-tpl-name">'+escHtml(tpl.name)+'</span><span class="hcm-tpl-meta">'+tpl.prices.length+' 个国家'+(tpl.updatedAt?' · '+new Date(tpl.updatedAt).toLocaleString():'')+'</span>';
       const actions = document.createElement('div');
       actions.className = 'hcm-tpl-actions';
 
-      // Apply
       const applyBtn = document.createElement('button');
       applyBtn.className = 'hcm-btn hcm-btn-success hcm-btn-sm';
       applyBtn.textContent = '套用';
-      applyBtn.onclick = () => {
-        if (!confirm(`确认将模板"${tpl.name}"的申报价套用到当前表格？`)) return;
-        const n = applyTemplate(tpl);
-        toast(`已套用 ${n} 个国家的价格`);
+      applyBtn.onclick = function(){
+        if(!confirm('确认套用模板"'+tpl.name+'"？')) return;
+        toast('已套用 '+applyTemplate(tpl)+' 个国家的价格');
       };
       actions.appendChild(applyBtn);
 
-      // Edit
       const editBtn = document.createElement('button');
       editBtn.className = 'hcm-btn hcm-btn-sm';
       editBtn.textContent = '编辑';
-      editBtn.onclick = () => {
-        editingIndex = idx;
-        currentView = 'edit';
-        // 合并当前国家列表和已有价格
-        const curCountries = getCountries();
-        const existingMap = {};
-        tpl.prices.forEach(p => { existingMap[p.country.trim()] = p.price; });
-        window.__hcm_edit_data = {
-          name: tpl.name,
-          prices: curCountries.map(c => ({ country: c, price: existingMap[c] || '' }))
-        };
+      editBtn.onclick = function(){
+        editingIndex=idx; currentView='edit';
+        const em={}; tpl.prices.forEach(function(p){em[p.country.trim()]=p.price;});
+        window.__hcm_edit_data={name:tpl.name,prices:allCountries.map(function(c){return{country:c,price:em[c]||''};})};
         render();
       };
       actions.appendChild(editBtn);
 
-      // Delete
       const delBtn = document.createElement('button');
       delBtn.className = 'hcm-btn hcm-btn-danger hcm-btn-sm';
       delBtn.textContent = '删除';
-      delBtn.onclick = () => {
-        if (!confirm(`确认删除模板"${tpl.name}"？`)) return;
-        const templates = loadTemplates();
-        templates.splice(idx, 1);
-        saveTemplates(templates);
-        toast('模板已删除');
-        render();
+      delBtn.onclick = function(){
+        if(!confirm('确认删除"'+tpl.name+'"？')) return;
+        const tpls=loadTemplates(); tpls.splice(idx,1); saveTemplates(tpls); toast('已删除'); render();
       };
       actions.appendChild(delBtn);
 
-      item.appendChild(info);
-      item.appendChild(actions);
-      list.appendChild(item);
+      item.appendChild(info); item.appendChild(actions); list.appendChild(item);
     });
-
     frag.appendChild(list);
   }
-
   return frag;
 }
 
 function renderEditView(templates) {
-  const data = editingIndex >= 0 ? window.__hcm_edit_data : window.__hcm_new_template;
-  if (!data) { toast('数据丢失', 'error'); currentView = 'list'; render(); return document.createElement('div'); }
-
+  const data = editingIndex>=0 ? window.__hcm_edit_data : window.__hcm_new_template;
+  if(!data){toast('数据丢失','error');currentView='list';render();return document.createElement('div');}
   const frag = document.createDocumentFragment();
 
-  // Template name row
-  const nameRow = document.createElement('div');
-  nameRow.style.cssText = 'margin-bottom:16px;display:flex;align-items:center;gap:12px';
-  const nameLabel = document.createElement('label');
-  nameLabel.textContent = '模板名称：';
-  nameLabel.style.fontWeight = '600';
-  const nameInput = document.createElement('input');
-  nameInput.value = data.name;
-  nameInput.style.cssText = 'flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px';
-  nameRow.appendChild(nameLabel);
-  nameRow.appendChild(nameInput);
-  frag.appendChild(nameRow);
+  const nr = document.createElement('div');
+  nr.style.cssText = 'margin-bottom:16px;display:flex;align-items:center;gap:12px';
+  const nl = document.createElement('label'); nl.textContent='模板名称：'; nl.style.fontWeight='600';
+  const ni = document.createElement('input'); ni.value=data.name;
+  ni.style.cssText='flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px';
+  nr.appendChild(nl); nr.appendChild(ni); frag.appendChild(nr);
 
-  // Editable table
   const table = document.createElement('table');
   table.className = 'hcm-edit-table';
-  const thead = document.createElement('thead');
-  thead.innerHTML = '<tr><th style="width:40%">国家</th><th style="width:60%">申报价</th></tr>';
-  table.appendChild(thead);
-
+  table.innerHTML = '<thead><tr><th style="width:40%">国家</th><th style="width:60%">申报价</th></tr></thead>';
   const tbody = document.createElement('tbody');
-  data.prices.forEach((p, idx) => {
+  data.prices.forEach(function(p,idx){
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${escHtml(p.country)}</td><td><input type="text" value="${escAttr(p.price)}" data-idx="${idx}" placeholder="输入价格"></td>`;
+    tr.innerHTML = '<td>'+escHtml(p.country)+'</td><td><input type="text" value="'+escAttr(p.price)+'" data-idx="'+idx+'" placeholder="输入价格"></td>';
     tbody.appendChild(tr);
   });
-  table.appendChild(tbody);
-  frag.appendChild(table);
+  table.appendChild(tbody); frag.appendChild(table);
 
-  // Footer buttons
   const footer = document.createElement('div');
   footer.style.cssText = 'margin-top:20px;display:flex;gap:10px;justify-content:flex-end';
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'hcm-btn';
-  cancelBtn.textContent = '取消';
-  cancelBtn.onclick = () => { currentView = 'list'; render(); };
-  footer.appendChild(cancelBtn);
-
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'hcm-btn hcm-btn-primary';
-  saveBtn.textContent = '保存模板';
-  saveBtn.onclick = () => {
-    const name = nameInput.value.trim();
-    if (!name) { toast('请输入模板名称', 'error'); return; }
-    const prices = [];
-    tbody.querySelectorAll('input').forEach(inp => {
-      const idx = parseInt(inp.dataset.idx);
-      prices.push({ country: data.prices[idx].country, price: inp.value.trim() });
-    });
-
-    const newTpl = { name, prices, updatedAt: new Date().toISOString() };
-    if (editingIndex >= 0) {
-      templates[editingIndex] = newTpl;
-    } else {
-      templates.push(newTpl);
-    }
-    saveTemplates(templates);
-    toast('模板已保存');
-    currentView = 'list';
-    render();
+  const cb = document.createElement('button');
+  cb.className='hcm-btn'; cb.textContent='取消'; cb.onclick=function(){currentView='list';render();};
+  footer.appendChild(cb);
+  const sb = document.createElement('button');
+  sb.className='hcm-btn hcm-btn-primary'; sb.textContent='保存模板';
+  sb.onclick=function(){
+    const name=ni.value.trim();
+    if(!name){toast('请输入模板名称','error');return;}
+    const prices=[];
+    tbody.querySelectorAll('input').forEach(function(inp){prices.push({country:data.prices[parseInt(inp.dataset.idx)].country,price:inp.value.trim()});});
+    const nt={name,prices,updatedAt:new Date().toISOString()};
+    if(editingIndex>=0) templates[editingIndex]=nt; else templates.push(nt);
+    saveTemplates(templates); toast('已保存'); currentView='list'; render();
   };
-  footer.appendChild(saveBtn);
-
-  frag.appendChild(footer);
+  footer.appendChild(sb); frag.appendChild(footer);
   return frag;
 }
 
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function escAttr(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escAttr(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-// ==================== 启动 ====================
+// ==================== 启动（异步收集） ====================
 try {
-  getLines(); // 先检查 DOM 是否存在
-  render();
+  getWrapper();
+  console.log('[模板工具] 正在通过自动滚动收集全部国家...');
+  collectAllCountries(function(countries) {
+    allCountries = countries;
+    console.log('[模板工具] 收集完成，共 ' + countries.length + ' 个国家: ' + countries.join(', '));
+    render();
+  });
 } catch(e) {
   alert('错误：' + e.message);
 }
