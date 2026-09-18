@@ -2,6 +2,8 @@
   'use strict';
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const randBetween = (min, max) => Math.round(min + Math.random() * Math.max(0, max - min));
+  const ERP_EXTENSION_ID = 'ecofkipcicjifkppbgnkaghcfofmpkia';
 
   function visible(el) {
     if (!el || !(el instanceof Element)) return false;
@@ -23,8 +25,16 @@
   }
 
   function isChallengePage() {
-    const body = (document.body?.innerText || '').toLowerCase().slice(0, 12000);
-    return /(?:verify you are human|are you a robot|security verification|captcha|人机验证|安全验证|滑块验证|请完成验证)/i.test(body);
+    const body = (document.body?.innerText || '').toLowerCase().slice(0, 18000);
+    if (/(?:verify you are human|are you a robot|security verification|captcha|human verification|人机验证|安全验证|滑块验证|请完成验证|请验证|访问异常)/i.test(body)) return true;
+    const challengeSelectors = [
+      'iframe[src*="captcha" i]', 'iframe[src*="challenge" i]', 'iframe[src*="recaptcha" i]', 'iframe[src*="arkose" i]',
+      '[id*="captcha" i]', '[class*="captcha" i]', '[id*="challenge" i][role="dialog"]', '[class*="challenge" i][role="dialog"]'
+    ];
+    for (const sel of challengeSelectors) {
+      try { if (Array.from(document.querySelectorAll(sel)).some(visible)) return true; } catch (_) {}
+    }
+    return false;
   }
 
   function findSearchInput() {
@@ -217,7 +227,7 @@
       if (all.size >= maxProducts) break;
       if (i === maxScrolls) break;
       window.scrollTo({ top: Math.max(document.documentElement.scrollHeight - 900, 0), behavior: 'smooth' });
-      await sleep(1100);
+      await sleep(randBetween(1500, 2600));
       if (all.size === last) stable++; else stable = 0;
       last = all.size;
       if (stable >= 3) break;
@@ -307,7 +317,7 @@
     return roots;
   }
 
-  function findMiaoShouButton(customSelector) {
+  function findErpButton(customSelector) {
     const roots = allRoots();
     if (customSelector) {
       for (const root of roots) {
@@ -334,7 +344,7 @@
         if (!score) continue;
         if (el.matches('button,a,[role="button"]')) score += 30;
         const ancestry = `${el.id || ''} ${el.className || ''} ${el.closest('[id],[class]')?.id || ''} ${el.closest('[id],[class]')?.className || ''}`.toLowerCase();
-        if (/miaoshou|91miaoshou|msfetch|妙手/.test(ancestry)) score += 80;
+        if (/miaoshou|91miaoshou|msfetch|妙手|cross.?border|erp|ecofkipcicjifkppbgnkaghcfofmpkia/.test(ancestry)) score += 80;
         const st = getComputedStyle(el);
         if (st.position === 'fixed' || st.position === 'sticky') score += 15;
         hits.push({ el, source: 'auto-text', score, txt });
@@ -348,18 +358,24 @@
     return Array.from(document.querySelectorAll('iframe')).map(f => f.src || '').filter(src => src.startsWith('chrome-extension://'));
   }
 
-  async function triggerMiaoShou(options) {
+  function targetErpIframes() {
+    return detectExtensionIframes().filter(src => src.startsWith(`chrome-extension://${ERP_EXTENSION_ID}/`));
+  }
+
+  async function triggerErp(options) {
     options = options || {};
     if (isChallengePage()) return { ok: false, challenge: true, error: '检测到 Temu 人机/安全验证' };
-    const hit = findMiaoShouButton(options.customSelector || '');
+    const hit = findErpButton(options.customSelector || '');
     if (!hit) {
       const extFrames = detectExtensionIframes();
+      const targetFrames = targetErpIframes();
       return {
         ok: false,
         error: extFrames.length
-          ? '检测到扩展 iframe，但无法直接读取其中按钮。可在高级设置填写妙手页面按钮 CSS 选择器；若妙手完全使用封闭扩展 iframe，则 Chrome 的扩展隔离机制不允许另一个扩展直接点击其内部控件。'
-          : '未找到妙手ERP的“采集此产品/立即采集”按钮。请确认妙手插件已启用、已登录并刷新 Temu 页面。',
-        extensionIframes: extFrames.length
+          ? `检测到扩展 iframe（其中跨境ERP助手 ${targetFrames.length} 个），但无法直接读取其中按钮。可在高级设置填写跨境ERP助手页面按钮 CSS 选择器；若其完全使用封闭扩展 iframe，则 Chrome 的扩展隔离机制不允许另一个扩展直接点击内部控件。`
+          : `未找到跨境ERP助手的“采集此产品/立即采集”按钮。请确认扩展已启用、已登录并刷新 Temu 页面。目标扩展 ID：${ERP_EXTENSION_ID}`,
+        extensionIframes: extFrames.length,
+        targetErpIframes: targetFrames.length
       };
     }
     hit.el.scrollIntoView({ block: 'center', inline: 'center' });
@@ -393,7 +409,7 @@
         case 'SCAN_RESULTS': return scanResults(msg.options);
         case 'CLICK_NEXT': return clickNext();
         case 'GET_DETAIL': return detailData();
-        case 'TRIGGER_MIAOSHOU': return triggerMiaoShou(msg.options);
+        case 'TRIGGER_ERP': return triggerErp(msg.options);
         case 'CHECK_CHALLENGE': return { ok: true, challenge: isChallengePage() };
         default: return { ok: false, error: 'Unknown message type' };
       }

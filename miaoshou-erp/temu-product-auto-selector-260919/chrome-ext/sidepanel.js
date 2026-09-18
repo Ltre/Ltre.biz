@@ -2,24 +2,38 @@
   'use strict';
 
   const R = globalThis.TemuRules;
+  const AI = globalThis.TemuAI;
+  const ERP_EXTENSION_ID = 'ecofkipcicjifkppbgnkaghcfofmpkia';
   const $ = id => document.getElementById(id);
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const randBetween = (min, max) => {
+    min = Number(min) || 0; max = Number(max) || min;
+    if (max < min) [min, max] = [max, min];
+    return Math.round(min + Math.random() * Math.max(0, max - min));
+  };
 
   const els = {
-    keywords: $('keywords'), filterRules: $('filterRules'), limitRules: $('limitRules'),
+    keywords: $('keywords'), keywordsPrompt: $('keywordsPrompt'),
+    filterRules: $('filterRules'), filterPrompt: $('filterPrompt'),
+    limitRules: $('limitRules'), limitPrompt: $('limitPrompt'),
     saveBtn: $('saveBtn'), resetBtn: $('resetBtn'), scanBtn: $('scanBtn'),
     statusCard: $('statusCard'), statusTitle: $('statusTitle'), taskId: $('taskId'), progressBar: $('progressBar'), statusText: $('statusText'),
     resumeBtn: $('resumeBtn'), stopBtn: $('stopBtn'),
     resultsCard: $('resultsCard'), resultCounts: $('resultCounts'), resultList: $('resultList'), showExcluded: $('showExcluded'),
     selectAllBtn: $('selectAllBtn'), collectBtn: $('collectBtn'), exportBtn: $('exportBtn'),
     taskHistory: $('taskHistory'), loadTaskBtn: $('loadTaskBtn'), deleteTaskBtn: $('deleteTaskBtn'),
-    miaoshouSelector: $('miaoshouSelector'), collectDelay: $('collectDelay'), toast: $('toast')
+    erpSelector: $('erpSelector'), collectDelay: $('collectDelay'), navDelayMin: $('navDelayMin'), navDelayMax: $('navDelayMax'), detailDelayMin: $('detailDelayMin'), detailDelayMax: $('detailDelayMax'),
+    aiMode: $('aiMode'), aiBadge: $('aiBadge'), aiProfileSelect: $('aiProfileSelect'), aiProfileName: $('aiProfileName'), aiProvider: $('aiProvider'), aiBaseUrl: $('aiBaseUrl'), aiModel: $('aiModel'), aiApiKey: $('aiApiKey'), aiApiPath: $('aiApiPath'),
+    aiSaveProfileBtn: $('aiSaveProfileBtn'), aiNewProfileBtn: $('aiNewProfileBtn'), aiDeleteProfileBtn: $('aiDeleteProfileBtn'), aiTestBtn: $('aiTestBtn'), aiTestResult: $('aiTestResult'),
+    toast: $('toast')
   };
 
   let currentTask = null;
   let running = false;
   let stopRequested = false;
   let workingTabId = null;
+  let aiProfiles = [];
+  let activeAiProfileId = '';
 
   const storageGet = keys => chrome.storage.local.get(keys);
   const storageSet = obj => chrome.storage.local.set(obj);
@@ -32,6 +46,7 @@
     const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
     return `T${stamp}-${rand}`;
   }
+  function profileId() { return `AI-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; }
 
   function toast(msg, ms = 2200) {
     els.toast.textContent = msg;
@@ -54,31 +69,143 @@
     els.stopBtn.classList.toggle('hidden', !on);
   }
 
+  function updateAiBadge() {
+    const enabled = els.aiMode?.value === 'fallback';
+    const p = aiProfiles.find(x => x.id === activeAiProfileId);
+    els.aiBadge.textContent = enabled ? `AI：${p?.name || '未配置'}` : 'AI 关闭';
+    els.aiBadge.title = enabled ? '仅在备用提示词需要且确定性规则不足时调用 AI' : '当前不会调用 AI API';
+  }
+
   async function loadConfig() {
-    const data = await storageGet(['formConfig', 'advancedConfig']);
+    const data = await storageGet(['formConfig', 'advancedConfig', 'aiConfig']);
     const cfg = data.formConfig || R.EXAMPLE;
     els.keywords.value = cfg.keywords || R.EXAMPLE.keywords;
     els.filterRules.value = cfg.filterRules || R.EXAMPLE.filterRules;
     els.limitRules.value = cfg.limitRules || R.EXAMPLE.limitRules;
+    els.keywordsPrompt.value = cfg.keywordsPrompt || '';
+    els.filterPrompt.value = cfg.filterPrompt || '';
+    els.limitPrompt.value = cfg.limitPrompt || '';
     const adv = data.advancedConfig || {};
-    els.miaoshouSelector.value = adv.miaoshouSelector || '';
-    els.collectDelay.value = adv.collectDelay || 2500;
+    els.erpSelector.value = adv.erpSelector || adv.miaoshouSelector || '';
+    els.collectDelay.value = adv.collectDelay || 3500;
+    els.navDelayMin.value = adv.navDelayMin || 3500;
+    els.navDelayMax.value = adv.navDelayMax || 6500;
+    els.detailDelayMin.value = adv.detailDelayMin || 2200;
+    els.detailDelayMax.value = adv.detailDelayMax || 4500;
+
+    const aic = data.aiConfig || {};
+    aiProfiles = Array.isArray(aic.profiles) ? aic.profiles : [];
+    activeAiProfileId = aic.activeProfileId || aiProfiles[0]?.id || '';
+    els.aiMode.value = aic.mode || 'off';
+    refreshAiProfileSelect();
+    loadAiProfileIntoForm(activeAiProfileId);
+    updateAiBadge();
   }
 
   async function saveConfig(showToast = true) {
     const formConfig = {
       keywords: els.keywords.value.trim(),
+      keywordsPrompt: els.keywordsPrompt.value.trim(),
       filterRules: els.filterRules.value.trim(),
-      limitRules: els.limitRules.value.trim()
+      filterPrompt: els.filterPrompt.value.trim(),
+      limitRules: els.limitRules.value.trim(),
+      limitPrompt: els.limitPrompt.value.trim()
     };
+    const navMin = Math.max(1500, Math.min(60000, Number(els.navDelayMin.value) || 3500));
+    const navMax = Math.max(navMin, Math.min(60000, Number(els.navDelayMax.value) || 6500));
+    const detailMin = Math.max(1000, Math.min(60000, Number(els.detailDelayMin.value) || 2200));
+    const detailMax = Math.max(detailMin, Math.min(60000, Number(els.detailDelayMax.value) || 4500));
     const advancedConfig = {
-      miaoshouSelector: els.miaoshouSelector.value.trim(),
-      collectDelay: Math.max(800, Math.min(15000, Number(els.collectDelay.value) || 2500))
+      erpSelector: els.erpSelector.value.trim(),
+      collectDelay: Math.max(1000, Math.min(30000, Number(els.collectDelay.value) || 3500)),
+      navDelayMin: navMin, navDelayMax: navMax,
+      detailDelayMin: detailMin, detailDelayMax: detailMax,
+      erpExtensionId: ERP_EXTENSION_ID
     };
-    await storageSet({ formConfig, advancedConfig });
+    const aiConfig = { mode: els.aiMode.value, activeProfileId: activeAiProfileId, profiles: aiProfiles };
+    await storageSet({ formConfig, advancedConfig, aiConfig });
+    updateAiBadge();
     if (showToast) toast('配置已保存');
-    return { formConfig, advancedConfig };
+    return { formConfig, advancedConfig, aiConfig };
   }
+
+  function refreshAiProfileSelect() {
+    els.aiProfileSelect.innerHTML = '';
+    if (!aiProfiles.length) {
+      const o = document.createElement('option'); o.value = ''; o.textContent = '暂无配置'; els.aiProfileSelect.appendChild(o); return;
+    }
+    for (const p of aiProfiles) {
+      const o = document.createElement('option'); o.value = p.id; o.textContent = `${p.name || '未命名'} · ${AI.PROVIDERS[p.provider]?.label || p.provider}`;
+      if (p.id === activeAiProfileId) o.selected = true;
+      els.aiProfileSelect.appendChild(o);
+    }
+  }
+
+  function loadAiProfileIntoForm(id) {
+    const p = aiProfiles.find(x => x.id === id);
+    if (!p) {
+      const preset = AI.PROVIDERS.openai;
+      els.aiProfileName.value = '';
+      els.aiProvider.value = 'openai'; els.aiBaseUrl.value = preset.baseUrl; els.aiModel.value = preset.model; els.aiApiKey.value = ''; els.aiApiPath.value = '';
+      return;
+    }
+    els.aiProfileName.value = p.name || '';
+    els.aiProvider.value = p.provider || 'openai';
+    els.aiBaseUrl.value = p.baseUrl || '';
+    els.aiModel.value = p.model || '';
+    els.aiApiKey.value = p.apiKey || '';
+    els.aiApiPath.value = p.apiPath || '';
+  }
+
+  function aiProfileFromForm(existingId = '') {
+    return {
+      id: existingId || profileId(),
+      name: els.aiProfileName.value.trim() || '未命名配置',
+      provider: els.aiProvider.value,
+      baseUrl: els.aiBaseUrl.value.trim(),
+      model: els.aiModel.value.trim(),
+      apiKey: els.aiApiKey.value.trim(),
+      apiPath: els.aiApiPath.value.trim()
+    };
+  }
+
+  async function saveAiProfile(asNew = false) {
+    const existing = !asNew ? (aiProfiles.find(x => x.id === activeAiProfileId)?.id || '') : '';
+    const p = aiProfileFromForm(existing);
+    if (!p.baseUrl || !p.model || !p.apiKey) return toast('请填写 Base URL、模型和 API Key');
+    try {
+      const granted = await AI.ensureOriginPermission(p, true);
+      if (!granted) return toast('未授予 AI API 域名访问权限');
+    } catch (e) { return toast(`域名权限失败：${e.message}`); }
+    const idx = aiProfiles.findIndex(x => x.id === p.id);
+    if (idx >= 0) aiProfiles[idx] = p; else aiProfiles.push(p);
+    activeAiProfileId = p.id;
+    await saveConfig(false);
+    refreshAiProfileSelect(); loadAiProfileIntoForm(activeAiProfileId); updateAiBadge();
+    toast(asNew ? '已新增 AI 配置' : 'AI 配置已保存');
+  }
+
+  async function deleteAiProfile() {
+    if (!activeAiProfileId) return;
+    aiProfiles = aiProfiles.filter(x => x.id !== activeAiProfileId);
+    activeAiProfileId = aiProfiles[0]?.id || '';
+    await saveConfig(false); refreshAiProfileSelect(); loadAiProfileIntoForm(activeAiProfileId); updateAiBadge(); toast('AI 配置已删除');
+  }
+
+  async function testAiProfile() {
+    const p = aiProfileFromForm(activeAiProfileId || '');
+    els.aiTestResult.className = 'hint'; els.aiTestResult.textContent = '测试中…';
+    try {
+      const granted = await AI.ensureOriginPermission(p, true);
+      if (!granted) throw new Error('未授予域名权限');
+      const text = await AI.callText(p, '只返回 OK 两个字母。', '连通性测试。');
+      els.aiTestResult.className = 'hint ok'; els.aiTestResult.textContent = `连接成功：${String(text || '').trim().slice(0, 80) || '收到响应'}`;
+    } catch (e) {
+      els.aiTestResult.className = 'hint err'; els.aiTestResult.textContent = `连接失败：${e.message}`;
+    }
+  }
+
+  function activeAiProfile() { return aiProfiles.find(x => x.id === activeAiProfileId) || null; }
 
   async function getTasks() {
     const { tasks = [] } = await storageGet(['tasks']);
@@ -233,15 +360,26 @@
   async function startScan() {
     if (running) return;
     stopRequested = false;
-    const { formConfig } = await saveConfig(false);
+    const { formConfig, advancedConfig, aiConfig } = await saveConfig(false);
     const keywords = R.splitLines(formConfig.keywords);
     if (!keywords.length) return toast('请至少填写一个搜索关键词');
     const filter = R.parseFilterRules(formConfig.filterRules);
     const limits = R.parseLimitRules(formConfig.limitRules);
+    const profile = activeAiProfile();
+    const wantsAi = aiConfig.mode === 'fallback' && [formConfig.keywordsPrompt, formConfig.filterPrompt, formConfig.limitPrompt].some(v => String(v || '').trim());
+    if (wantsAi && !profile) return toast('已启用 AI 兜底并填写了备用提示词，但还没有可用的 AI 配置');
 
     currentTask = {
       id: taskId(), createdAt: nowIso(), updatedAt: nowIso(), status: 'scanning',
-      config: { ...formConfig, parsedFilter: filter, parsedLimits: limits },
+      config: {
+        ...formConfig,
+        parsedFilter: filter,
+        parsedLimits: limits,
+        advanced: advancedConfig,
+        ai: { mode: aiConfig.mode, profileId: profile?.id || '', profileName: profile?.name || '', provider: profile?.provider || '', model: profile?.model || '' }
+      },
+      resolvedKeywords: null,
+      aiUsage: { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] },
       cursor: { keywordIndex: 0, pageIndex: 0 }, candidates: [],
       log: [], error: null
     };
@@ -258,7 +396,29 @@
       task.workingTabId = tab.id;
       const filter = task.config.parsedFilter || R.parseFilterRules(task.config.filterRules);
       const limits = task.config.parsedLimits || R.parseLimitRules(task.config.limitRules);
-      const keywords = R.splitLines(task.config.keywords);
+      const adv = task.config.advanced || { navDelayMin: 3500, navDelayMax: 6500, detailDelayMin: 2200, detailDelayMax: 4500 };
+      const profile = aiProfiles.find(x => x.id === task.config?.ai?.profileId) || null;
+      const explicitKeywords = R.splitLines(task.config.keywords);
+      if (!task.resolvedKeywords) {
+        let resolved = [...explicitKeywords];
+        if (task.config?.ai?.mode === 'fallback' && task.config.keywordsPrompt?.trim() && profile) {
+          setStatus('AI 补充搜索词', `使用配置：${profile.name} / ${profile.model}`, 1);
+          try {
+            const extra = await AI.expandKeywords(profile, explicitKeywords, task.config.keywordsPrompt);
+            task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] };
+            task.aiUsage.calls++; task.aiUsage.keywordCalls++;
+            for (const kw of extra) if (!resolved.some(x => x.toLowerCase() === kw.toLowerCase())) resolved.push(kw);
+            task.log.push({ at: nowIso(), type: 'ai-keywords', profileId: profile.id, model: profile.model, added: extra.length });
+          } catch (e) {
+            task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] };
+            task.aiUsage.errors.push({ at: nowIso(), stage: 'keywords', error: String(e?.message || e) });
+            task.log.push({ at: nowIso(), type: 'ai-error', stage: 'keywords', error: String(e?.message || e) });
+          }
+        }
+        task.resolvedKeywords = resolved;
+        await saveTask(task);
+      }
+      const keywords = task.resolvedKeywords || explicitKeywords;
       const registry = await historyRegistry();
 
       for (let ki = task.cursor?.keywordIndex || 0; ki < keywords.length; ki++) {
@@ -271,6 +431,7 @@
         if (sr?.challenge) return pauseTask(task, 'Temu 要求人机/安全验证。请在网页中手动完成验证后点击“继续当前任务”。');
         if (!sr?.ok) throw new Error(sr?.error || '搜索失败');
         await waitAfterNavigation(tab.id, before).catch(async () => { await sleep(2200); });
+        await sleep(randBetween(adv.navDelayMin, adv.navDelayMax));
 
         for (let pi = 0; pi < limits.maxPages; pi++) {
           if (stopRequested) throw new StopError();
@@ -300,13 +461,15 @@
           if (nx?.challenge) return pauseTask(task, '翻页时出现 Temu 验证。完成后继续。');
           if (!nx?.ok) break;
           await waitAfterNavigation(tab.id, prev).catch(async () => { await sleep(2200); });
+          await sleep(randBetween(adv.navDelayMin, adv.navDelayMax));
         }
 
         task.cursor = { keywordIndex: ki + 1, pageIndex: 0 };
         await saveTask(task);
       }
 
-      await verifyDetails(task, filter, limits, registry);
+      await verifyDetails(task, filter, limits, registry, adv);
+      await verifyWithAI(task);
       task.status = 'review'; task.cursor = null;
       await saveTask(task);
       setStatus('筛选完成', '请审核结果；确认后点击“执行采集”。', 100);
@@ -328,7 +491,7 @@
     }
   }
 
-  async function verifyDetails(task, filter, limits, registry) {
+  async function verifyDetails(task, filter, limits, registry, adv) {
     const pending = task.candidates.filter(c => c.decision === 'review').slice(0, limits.maxDetails);
     if (!pending.length) return;
     for (let i = 0; i < pending.length; i++) {
@@ -354,13 +517,53 @@
       } finally {
         if (tab?.id) await chrome.tabs.remove(tab.id).catch(() => {});
       }
+      await sleep(randBetween(adv?.detailDelayMin || 2200, adv?.detailDelayMax || 4500));
       await saveTask(task);
       renderTask();
     }
   }
 
-  async function pauseTask(task, message) {
-    task.status = 'paused'; task.error = message;
+  async function verifyWithAI(task) {
+    if (task.config?.ai?.mode !== 'fallback') return;
+    const filterPrompt = task.config.filterPrompt?.trim() || '';
+    const limitPrompt = task.config.limitPrompt?.trim() || '';
+    if (!filterPrompt && !limitPrompt) return;
+    const profile = aiProfiles.find(x => x.id === task.config?.ai?.profileId);
+    if (!profile) {
+      task.log.push({ at: nowIso(), type: 'ai-skip', reason: '任务绑定的 AI 配置不存在' });
+      return;
+    }
+    const maxReviews = task.config?.parsedLimits?.maxDetails ?? 20;
+    const pending = task.candidates.filter(c => c.decision === 'review' && !c.aiReview).slice(0, maxReviews);
+    for (let i = 0; i < pending.length; i++) {
+      if (stopRequested) throw new StopError();
+      const cand = pending[i];
+      setStatus('AI 兜底复核', `${i + 1}/${pending.length} · ${profile.name} / ${profile.model}
+${cand.title.slice(0, 75)}`, 95 + ((i + 1) / Math.max(1, pending.length)) * 4);
+      try {
+        const result = await AI.reviewCandidate(profile, cand, { filterPrompt, limitPrompt });
+        task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] };
+        task.aiUsage.calls++; task.aiUsage.reviewCalls++;
+        cand.aiReview = { ...result, profileId: profile.id, profileName: profile.name, provider: profile.provider, model: profile.model, at: nowIso() };
+        cand.decision = result.decision;
+        cand.selected = result.decision !== 'excluded';
+        cand.reasons = [...(cand.reasons || []), ...(result.reasons || []).map(x => `AI兜底：${x}`)];
+        if (result.decision !== 'review') cand.unknown = [];
+        task.log.push({ at: nowIso(), type: 'ai-review', productId: cand.productId, decision: result.decision, confidence: result.confidence, model: profile.model });
+      } catch (e) {
+        task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] };
+        task.aiUsage.errors.push({ at: nowIso(), stage: 'review', productId: cand.productId, error: String(e?.message || e) });
+        cand.aiReview = { error: String(e?.message || e), at: nowIso() };
+        task.log.push({ at: nowIso(), type: 'ai-error', stage: 'review', productId: cand.productId, error: String(e?.message || e) });
+      }
+      await saveTask(task);
+      renderTask();
+      await sleep(350);
+    }
+  }
+
+  async function pauseTask(task, message, phase = 'scan') {
+    task.status = 'paused'; task.error = message; task.pausePhase = phase;
     await saveTask(task);
     setStatus('已暂停', message, null);
     els.resumeBtn.classList.remove('hidden');
@@ -370,7 +573,14 @@
 
   async function resumeTask() {
     if (!currentTask || currentTask.status !== 'paused') return;
-    currentTask.status = 'scanning'; currentTask.error = null;
+    const phase = currentTask.pausePhase || 'scan';
+    currentTask.error = null; currentTask.pausePhase = null;
+    if (phase === 'collect') {
+      currentTask.status = 'review';
+      await saveTask(currentTask);
+      return collectSelected();
+    }
+    currentTask.status = 'scanning';
     await saveTask(currentTask);
     await runScan(currentTask);
   }
@@ -380,8 +590,8 @@
     const selected = currentTask.candidates.filter(c => c.selected && c.decision !== 'excluded' && !c.collected);
     if (!selected.length) return toast('没有选中的待采集商品');
     const { advancedConfig = {} } = await storageGet(['advancedConfig']);
-    const delay = Math.max(800, Number(advancedConfig.collectDelay) || 2500);
-    const selector = advancedConfig.miaoshouSelector || '';
+    const delay = Math.max(1000, Number(advancedConfig.collectDelay) || 3500);
+    const selector = advancedConfig.erpSelector || advancedConfig.miaoshouSelector || '';
     stopRequested = false;
     setRunningUI(true);
     currentTask.status = 'collecting';
@@ -393,23 +603,23 @@
       for (let i = 0; i < selected.length; i++) {
         if (stopRequested) throw new StopError();
         const item = selected[i];
-        setStatus('执行妙手采集', `${i + 1}/${selected.length}：${item.title.slice(0, 70)}`, (i / selected.length) * 100);
+        setStatus('执行跨境ERP助手采集', `${i + 1}/${selected.length}：${item.title.slice(0, 70)}`, (i / selected.length) * 100);
         await chrome.tabs.update(tab.id, { url: item.url, active: true });
         await waitTabReady(tab.id, 25000);
         const challenge = await send(tab.id, { type: 'CHECK_CHALLENGE' });
         if (challenge?.challenge) {
-          return pauseTask(currentTask, '采集过程中出现 Temu 人机/安全验证。完成验证后，请重新点击“执行采集”继续未完成商品。');
+          return pauseTask(currentTask, '采集过程中出现 Temu 人机/安全验证。请在网页中手动完成验证后点击“继续当前任务”，将从未完成商品继续。', 'collect');
         }
-        const res = await send(tab.id, { type: 'TRIGGER_MIAOSHOU', options: { customSelector: selector } }, 12000);
+        const res = await send(tab.id, { type: 'TRIGGER_ERP', options: { customSelector: selector, extensionId: ERP_EXTENSION_ID } }, 12000);
         if (!res?.ok) {
-          item.collectedState = 'failed'; item.collectError = res?.error || '未找到妙手采集按钮';
+          item.collectedState = 'failed'; item.collectError = res?.error || '未找到跨境ERP助手采集按钮';
           currentTask.log.push({ at: nowIso(), type: 'collect-failed', productId: item.productId, error: item.collectError });
           await saveTask(currentTask);
           renderTask();
           // Stop on adapter failure to avoid silently skipping a batch.
-          currentTask.status = 'paused'; currentTask.error = item.collectError;
+          currentTask.status = 'paused'; currentTask.error = item.collectError; currentTask.pausePhase = 'adapter';
           await saveTask(currentTask);
-          setStatus('妙手适配已暂停', `${item.collectError}\n已完成的商品不会重复执行。`, (i / selected.length) * 100);
+          setStatus('跨境ERP助手适配已暂停', `${item.collectError}\n已完成的商品不会重复执行。`, (i / selected.length) * 100);
           els.resumeBtn.classList.add('hidden');
           return;
         }
@@ -424,7 +634,7 @@
       }
       currentTask.status = 'completed'; currentTask.error = null;
       await saveTask(currentTask);
-      setStatus('采集执行完成', '已对所有选中商品触发妙手ERP采集入口。妙手后台入库结果请在妙手ERP中查看。', 100);
+      setStatus('采集执行完成', '已对所有选中商品触发跨境ERP助手采集入口。ERP 后台入库结果请在跨境ERP助手中查看。', 100);
     } catch (err) {
       if (err instanceof StopError) {
         currentTask.status = 'stopped';
@@ -464,7 +674,7 @@
     const review = cands.filter(c => c.decision === 'review').length;
     const excluded = cands.filter(c => c.decision === 'excluded').length;
     const collected = cands.filter(c => c.collected).length;
-    els.resultCounts.textContent = `通过 ${pass} · 待确认 ${review} · 排除 ${excluded} · 已触发采集 ${collected}`;
+    els.resultCounts.textContent = `通过 ${pass} · 待确认 ${review} · 排除 ${excluded} · 已触发采集 ${collected} · AI ${currentTask.aiUsage?.calls || 0} 次`;
 
     els.resultList.innerHTML = '';
     const showExcluded = els.showExcluded.checked;
@@ -483,7 +693,8 @@
       const badges = document.createElement('div'); badges.className = 'badges';
       badges.appendChild(badge(c.decision === 'pass' ? '通过' : c.decision === 'review' ? '需人工确认' : '已排除', c.decision));
       if (c.stage === 'detail') badges.appendChild(badge('已查详情', 'review'));
-      if (c.collected) badges.appendChild(badge(c.collectedState === 'confirmed' ? '妙手已确认' : '已触发妙手', 'collected'));
+      if (c.aiReview && !c.aiReview.error) badges.appendChild(badge(`AI ${Math.round((c.aiReview.confidence || 0) * 100)}%`, 'review'));
+      if (c.collected) badges.appendChild(badge(c.collectedState === 'confirmed' ? 'ERP已确认' : '已触发ERP', 'collected'));
       const reasons = document.createElement('div'); reasons.className = 'reasons';
       const rs = [...(c.reasons || []), ...(c.unknown || [])];
       reasons.textContent = rs.length ? rs.join('；') : '规则检查通过';
@@ -497,7 +708,7 @@
       els.resultList.appendChild(item);
     }
 
-    els.resumeBtn.classList.toggle('hidden', currentTask.status !== 'paused' || /妙手/.test(currentTask.error || ''));
+    els.resumeBtn.classList.toggle('hidden', currentTask.status !== 'paused' || currentTask.pausePhase === 'adapter');
     els.collectBtn.disabled = running || !cands.some(c => c.selected && c.decision !== 'excluded' && !c.collected);
   }
 
@@ -538,6 +749,7 @@
   els.saveBtn.addEventListener('click', () => saveConfig(true));
   els.resetBtn.addEventListener('click', async () => {
     els.keywords.value = R.EXAMPLE.keywords; els.filterRules.value = R.EXAMPLE.filterRules; els.limitRules.value = R.EXAMPLE.limitRules;
+    els.keywordsPrompt.value = ''; els.filterPrompt.value = ''; els.limitPrompt.value = '';
     await saveConfig(false); toast('已恢复示例配置');
   });
   els.scanBtn.addEventListener('click', startScan);
@@ -553,8 +765,26 @@
   els.exportBtn.addEventListener('click', exportTask);
   els.loadTaskBtn.addEventListener('click', () => loadTaskById(els.taskHistory.value));
   els.deleteTaskBtn.addEventListener('click', deleteCurrentTask);
-  els.miaoshouSelector.addEventListener('change', () => saveConfig(false));
-  els.collectDelay.addEventListener('change', () => saveConfig(false));
+
+  for (const el of [els.erpSelector, els.collectDelay, els.navDelayMin, els.navDelayMax, els.detailDelayMin, els.detailDelayMax]) {
+    el.addEventListener('change', () => saveConfig(false));
+  }
+  els.aiMode.addEventListener('change', () => saveConfig(false));
+  els.aiProfileSelect.addEventListener('change', async () => {
+    activeAiProfileId = els.aiProfileSelect.value;
+    loadAiProfileIntoForm(activeAiProfileId); updateAiBadge(); await saveConfig(false);
+  });
+  els.aiProvider.addEventListener('change', () => {
+    const preset = AI.PROVIDERS[els.aiProvider.value];
+    if (!preset) return;
+    els.aiBaseUrl.value = preset.baseUrl || '';
+    els.aiModel.value = preset.model || '';
+    els.aiApiPath.value = '';
+  });
+  els.aiSaveProfileBtn.addEventListener('click', () => saveAiProfile(false));
+  els.aiNewProfileBtn.addEventListener('click', () => saveAiProfile(true));
+  els.aiDeleteProfileBtn.addEventListener('click', deleteAiProfile);
+  els.aiTestBtn.addEventListener('click', testAiProfile);
 
   (async function init() {
     await loadConfig();

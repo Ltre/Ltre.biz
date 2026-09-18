@@ -1,9 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Temu 商品严选及妙手采集",
-  "version": "1.0.0",
-  "description": "按关键词与规则筛选 Temu 商品，审核后借用妙手ERP页面采集入口执行采集。",
-  "permissions": ["storage", "tabs", "sidePanel", "unlimitedStorage"],
+  "name": "Temu 商品严选及跨境ERP助手采集",
+  "version": "1.1.0",
+  "description": "按关键词与规则筛选 Temu 商品，审核后借用跨境ERP助手页面采集入口执行采集；支持可切换 AI API 兜底。",
+  "permissions": [
+    "storage",
+    "tabs",
+    "sidePanel",
+    "unlimitedStorage"
+  ],
   "host_permissions": [
     "https://www.temu.com/*",
     "https://*.temu.com/*"
@@ -12,15 +17,20 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Temu 商品严选及采集"
+    "default_title": "Temu 商品严选及跨境ERP助手采集"
   },
   "side_panel": {
     "default_path": "sidepanel.html"
   },
   "content_scripts": [
     {
-      "matches": ["https://www.temu.com/*", "https://*.temu.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.temu.com/*",
+        "https://*.temu.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -29,5 +39,9 @@
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ]
 }

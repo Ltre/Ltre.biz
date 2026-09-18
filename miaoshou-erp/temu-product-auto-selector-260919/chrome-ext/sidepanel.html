@@ -10,28 +10,40 @@
   <header class="topbar">
     <div>
       <h1>Temu 商品严选</h1>
-      <p>先筛选 · 人工审核 · 再借用妙手ERP采集</p>
+      <p>先筛选 · 人工审核 · 再借用跨境ERP助手采集</p>
     </div>
-    <span class="ai-zero" title="当前版本不调用AI接口">AI 0 次</span>
+    <span id="aiBadge" class="ai-zero" title="AI 默认关闭；仅在配置并启用后按需调用">AI 按需</span>
   </header>
 
   <main>
     <section class="card form-card">
       <label for="keywords">1、搜索关键词</label>
       <textarea id="keywords" rows="5" spellcheck="false"></textarea>
+      <details class="prompt-backup">
+        <summary>备用提示词（搜索关键词）</summary>
+        <textarea id="keywordsPrompt" rows="4" spellcheck="false" placeholder="当固定关键词不够表达需求时填写。例如：围绕 iPhone 16/17 系列补充英文搜索词，但不要手机壳、镜头膜。启用 AI 后会在任务开始时按需补充关键词。"></textarea>
+      </details>
 
       <label for="filterRules">2、商品筛选规则</label>
       <textarea id="filterRules" rows="6" spellcheck="false"></textarea>
+      <details class="prompt-backup">
+        <summary>备用提示词（商品筛选规则）</summary>
+        <textarea id="filterPrompt" rows="4" spellcheck="false" placeholder="用于表达普通规则表单难以覆盖的语义条件。仅当确定性规则/详情页仍无法判断时，才交给 AI 复核。"></textarea>
+      </details>
 
       <label for="limitRules">3、限制规则</label>
       <textarea id="limitRules" rows="7" spellcheck="false"></textarea>
+      <details class="prompt-backup">
+        <summary>备用提示词（限制规则）</summary>
+        <textarea id="limitPrompt" rows="4" spellcheck="false" placeholder="例如：避免明显第三方品牌自有商品，但“compatible with iPhone/Samsung”不视为品牌侵权；描述含糊时保留人工审核。"></textarea>
+      </details>
 
       <div class="button-row">
         <button id="saveBtn" class="secondary">保存配置</button>
         <button id="resetBtn" class="ghost">恢复示例</button>
         <button id="scanBtn" class="primary">筛选</button>
       </div>
-      <p class="hint">无法确定的候选会进入“需人工确认”，不会调用 AI 猜测。遇到 Temu 人机验证会自动暂停。</p>
+      <p class="hint">默认优先使用本地确定性规则。只有启用了 AI 且对应备用提示词非空时，才会调用当前 AI 配置。检测到 Temu 验证会暂停，需人工完成后继续。</p>
     </section>
 
     <section id="statusCard" class="card status-card hidden">
@@ -75,19 +87,76 @@
     </section>
 
     <section class="card">
+      <details id="aiSettings">
+        <summary>AI 推理设置</summary>
+        <label for="aiMode">AI 使用方式</label>
+        <select id="aiMode">
+          <option value="off">关闭（完全不调用）</option>
+          <option value="fallback">按需兜底（推荐）</option>
+        </select>
+
+        <label for="aiProfileSelect">当前配置</label>
+        <select id="aiProfileSelect"></select>
+
+        <div class="two-col">
+          <div>
+            <label for="aiProfileName">配置名称</label>
+            <input id="aiProfileName" type="text" placeholder="例如 OpenAI-主账号" />
+          </div>
+          <div>
+            <label for="aiProvider">平台</label>
+            <select id="aiProvider">
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="deepseek">DeepSeek</option>
+              <option value="custom_openai">自定义 OpenAI 兼容中转</option>
+            </select>
+          </div>
+        </div>
+
+        <label for="aiBaseUrl">Base URL</label>
+        <input id="aiBaseUrl" type="text" placeholder="https://api.example.com" />
+        <label for="aiModel">模型</label>
+        <input id="aiModel" type="text" placeholder="模型 ID" />
+        <label for="aiApiKey">API Key</label>
+        <input id="aiApiKey" type="password" autocomplete="off" placeholder="保存在 Chrome 本地扩展存储中" />
+        <label for="aiApiPath">自定义 API Path（可留空）</label>
+        <input id="aiApiPath" type="text" placeholder="例如 /v1/chat/completions" />
+        <div class="button-row compact">
+          <button id="aiSaveProfileBtn" class="secondary">保存/覆盖配置</button>
+          <button id="aiNewProfileBtn" class="ghost">另存为新配置</button>
+          <button id="aiDeleteProfileBtn" class="ghost danger-text">删除</button>
+          <button id="aiTestBtn" class="primary">测试连接</button>
+        </div>
+        <p id="aiTestResult" class="hint"></p>
+        <p class="hint">API Key 仅保存于本机 Chrome 的 <code>chrome.storage.local</code>，不会上传到本插件自建服务器（本插件也没有服务器）。浏览器扩展本地存储并不是独立密码保险箱，请按你的风险要求使用专用 Key/限额。</p>
+      </details>
+    </section>
+
+    <section class="card">
       <details>
-        <summary>高级设置 / 妙手适配</summary>
-        <label for="miaoshouSelector">妙手“采集此产品”按钮 CSS 选择器（可留空）</label>
-        <input id="miaoshouSelector" type="text" placeholder="例如 .xxx .collect-btn" />
+        <summary>高级设置 / 跨境ERP助手适配 / 访问节奏</summary>
+        <p class="hint">目标扩展：<code>跨境ERP助手</code>，ID：<code>ecofkipcicjifkppbgnkaghcfofmpkia</code></p>
+        <label for="erpSelector">“采集此产品”按钮 CSS 选择器（可留空）</label>
+        <input id="erpSelector" type="text" placeholder="例如 .xxx .collect-btn" />
         <label for="collectDelay">每件采集间隔（毫秒）</label>
-        <input id="collectDelay" type="number" min="800" max="15000" step="100" value="2500" />
-        <p class="hint">默认会按按钮文字自动识别；只有妙手改版导致识别失败时才需要填写选择器。</p>
+        <input id="collectDelay" type="number" min="1000" max="30000" step="100" value="3500" />
+
+        <div class="two-col">
+          <div><label for="navDelayMin">换关键词/翻页最短等待(ms)</label><input id="navDelayMin" type="number" min="1500" max="60000" step="100" value="3500" /></div>
+          <div><label for="navDelayMax">最长等待(ms)</label><input id="navDelayMax" type="number" min="1500" max="60000" step="100" value="6500" /></div>
+          <div><label for="detailDelayMin">详情页间最短等待(ms)</label><input id="detailDelayMin" type="number" min="1000" max="60000" step="100" value="2200" /></div>
+          <div><label for="detailDelayMax">最长等待(ms)</label><input id="detailDelayMax" type="number" min="1000" max="60000" step="100" value="4500" /></div>
+        </div>
+        <p class="hint">这些等待用于降低请求密度、给页面充分加载时间。插件不会自动破解 CAPTCHA/滑块，也不会伪造鼠标轨迹、指纹或其它绕过反爬验证的行为；发现验证时会暂停任务。</p>
       </details>
     </section>
   </main>
 
   <div id="toast" class="toast hidden"></div>
   <script src="lib/rules.js"></script>
+  <script src="lib/ai.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>
