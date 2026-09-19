@@ -10,7 +10,7 @@
 
 	   启用该模式后，日常商品筛选仍可继续按照原有策略决定是否使用 AI；但一旦检测到 Temu 的图形类风控验证码，就必须调用 AI 能力进行识别处理。
 
-
+	插件的代码请更新到chrome-ext目录。
 
 
 
@@ -39,10 +39,8 @@
 	* 为不同用户灵活配置允许使用的 AI 渠道。
 	* 进一步限制某个用户在指定渠道下具体可以使用哪些模型。
 
-	服务端计划部署在 Cloudflare 平台，可以参考：
-
-	《个人开发者福音：用 Cloudflare 打造全能免费云基础设施》
-	https://youtu.be/lRAp_Qg7qdQ
+	服务端计划部署在 Cloudflare 平台，可能会用到Workers、Workflows、静态托管Pages、对象存储R2、数据库D1、AI Gateway & Worker AI、本地部署用Wrangler CLI  可以参考：
+	https://www.youtube.com/watch?v=3MxhQGFpjro （"赛博大善人"CloudFlare，这些也全都免费？！）
 
 	需要特别注意：这个服务端必须与 Temu 插件的具体业务完全解耦。
 
@@ -56,7 +54,7 @@
 
 	暂时不确定是否适合直接采用，可以先作为架构设计和实现方式的参考，不必为了使用该项目而强行调整现有设计。
 
-
+	要求服务端代码保存到server目录，能够使用Wrangler CLI本地测试验证一整套从页面到数据库、存储、AI等。
 
 
 
