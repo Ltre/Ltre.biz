@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Temu 商品严选及跨境ERP助手采集",
-  "version": "1.1.0",
-  "description": "按关键词与规则筛选 Temu 商品，审核后借用跨境ERP助手页面采集入口执行采集；支持可切换 AI API 兜底。",
+  "version": "1.2.0",
+  "description": "按关键词与规则筛选 Temu 商品，审核后借用跨境ERP助手采集；AI 推理由独立服务端统一中转并支持风控图形验证识别。",
   "permissions": [
     "storage",
     "tabs",
     "sidePanel",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "activeTab"
   ],
   "host_permissions": [
     "https://www.temu.com/*",

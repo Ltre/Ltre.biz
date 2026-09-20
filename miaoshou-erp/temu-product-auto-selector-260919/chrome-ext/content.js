@@ -37,6 +37,30 @@
     return false;
   }
 
+  function challengeInfo() {
+    const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 9000);
+    const iframes = Array.from(document.querySelectorAll('iframe')).filter(visible).map(f => ({
+      src: (f.src || '').slice(0, 500),
+      title: (f.title || '').slice(0, 200),
+      name: (f.name || '').slice(0, 120)
+    })).filter(x => /captcha|challenge|verify|arkose|recaptcha|hcaptcha|human/i.test(`${x.src} ${x.title} ${x.name}`)).slice(0, 10);
+    const markers = [];
+    const sels = ['[id*="captcha" i]','[class*="captcha" i]','[id*="challenge" i]','[class*="challenge" i]','[class*="verify" i]','[id*="verify" i]'];
+    for (const sel of sels) {
+      try {
+        for (const el of Array.from(document.querySelectorAll(sel)).filter(visible).slice(0, 8)) {
+          markers.push({ selector: sel, text: textOf(el).slice(0, 500), tag: el.tagName });
+        }
+      } catch (_) {}
+    }
+    let hint = 'unknown';
+    const probe = `${bodyText} ${iframes.map(x => x.src).join(' ')}`.toLowerCase();
+    if (/slider|滑块|拖动|drag/.test(probe)) hint = 'slider';
+    else if (/select .*image|请选择.*图|图片|image captcha|click .*image/.test(probe)) hint = 'image_click_or_grid';
+    else if (/captcha|验证码/.test(probe)) hint = 'captcha';
+    return { ok: true, challenge: isChallengePage(), hint, url: location.href, title: document.title, text: bodyText, iframes, markers };
+  }
+
   function findSearchInput() {
     const selectors = [
       'input[type="search"]',
@@ -411,6 +435,7 @@
         case 'GET_DETAIL': return detailData();
         case 'TRIGGER_ERP': return triggerErp(msg.options);
         case 'CHECK_CHALLENGE': return { ok: true, challenge: isChallengePage() };
+        case 'GET_CHALLENGE_INFO': return challengeInfo();
         default: return { ok: false, error: 'Unknown message type' };
       }
     })().then(sendResponse).catch(err => sendResponse({ ok: false, error: String(err?.message || err) }));

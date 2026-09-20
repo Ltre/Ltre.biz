@@ -23,8 +23,7 @@
     selectAllBtn: $('selectAllBtn'), collectBtn: $('collectBtn'), exportBtn: $('exportBtn'),
     taskHistory: $('taskHistory'), loadTaskBtn: $('loadTaskBtn'), deleteTaskBtn: $('deleteTaskBtn'),
     erpSelector: $('erpSelector'), collectDelay: $('collectDelay'), navDelayMin: $('navDelayMin'), navDelayMax: $('navDelayMax'), detailDelayMin: $('detailDelayMin'), detailDelayMax: $('detailDelayMax'),
-    aiMode: $('aiMode'), aiBadge: $('aiBadge'), aiProfileSelect: $('aiProfileSelect'), aiProfileName: $('aiProfileName'), aiProvider: $('aiProvider'), aiBaseUrl: $('aiBaseUrl'), aiModel: $('aiModel'), aiApiKey: $('aiApiKey'), aiApiPath: $('aiApiPath'),
-    aiSaveProfileBtn: $('aiSaveProfileBtn'), aiNewProfileBtn: $('aiNewProfileBtn'), aiDeleteProfileBtn: $('aiDeleteProfileBtn'), aiTestBtn: $('aiTestBtn'), aiTestResult: $('aiTestResult'),
+    aiMode: $('aiMode'), aiBadge: $('aiBadge'), aiServerUrl: $('aiServerUrl'), aiPhone: $('aiPhone'), aiLoginCode: $('aiLoginCode'), aiSendCodeBtn: $('aiSendCodeBtn'), aiLoginBtn: $('aiLoginBtn'), aiLogoutBtn: $('aiLogoutBtn'), aiRefreshModelsBtn: $('aiRefreshModelsBtn'), aiLoginState: $('aiLoginState'), aiModelSelect: $('aiModelSelect'), aiTestBtn: $('aiTestBtn'), aiTestResult: $('aiTestResult'),
     toast: $('toast')
   };
 
@@ -32,8 +31,7 @@
   let running = false;
   let stopRequested = false;
   let workingTabId = null;
-  let aiProfiles = [];
-  let activeAiProfileId = '';
+  let aiGateway = { baseUrl: '', phone: '', token: '', user: null, channels: [], selectedModel: '' };
 
   const storageGet = keys => chrome.storage.local.get(keys);
   const storageSet = obj => chrome.storage.local.set(obj);
@@ -46,7 +44,6 @@
     const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
     return `T${stamp}-${rand}`;
   }
-  function profileId() { return `AI-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; }
 
   function toast(msg, ms = 2200) {
     els.toast.textContent = msg;
@@ -69,11 +66,38 @@
     els.stopBtn.classList.toggle('hidden', !on);
   }
 
+  function selectedModelInfo(modelId = aiGateway.selectedModel) {
+    for (const ch of aiGateway.channels || []) {
+      for (const m of ch.models || []) if (m.id === modelId) return { ...m, channelId: ch.id, channelName: ch.name, protocol: ch.protocol };
+    }
+    return null;
+  }
+
+  function activeAiService(modelId = aiGateway.selectedModel) {
+    if (!aiGateway.baseUrl || !aiGateway.token || !modelId) return null;
+    return { baseUrl: aiGateway.baseUrl, token: aiGateway.token, model: modelId };
+  }
+
+  function aiBusinessEnabled(mode = els.aiMode?.value) {
+    return mode === 'fallback' || mode === 'risk_required';
+  }
+
   function updateAiBadge() {
-    const enabled = els.aiMode?.value === 'fallback';
-    const p = aiProfiles.find(x => x.id === activeAiProfileId);
-    els.aiBadge.textContent = enabled ? `AI：${p?.name || '未配置'}` : 'AI 关闭';
-    els.aiBadge.title = enabled ? '仅在备用提示词需要且确定性规则不足时调用 AI' : '当前不会调用 AI API';
+    const mode = els.aiMode?.value || 'off';
+    const info = selectedModelInfo();
+    if (mode === 'off') {
+      els.aiBadge.textContent = 'AI 关闭';
+      els.aiBadge.title = '当前不会调用 AI Relay';
+    } else if (!aiGateway.token) {
+      els.aiBadge.textContent = 'AI：未登录';
+      els.aiBadge.title = '请先登录 AI Relay';
+    } else {
+      els.aiBadge.textContent = mode === 'risk_required' ? 'AI：风控强制' : 'AI：按需';
+      els.aiBadge.title = `${info?.channelName || ''} / ${info?.name || info?.model_id || aiGateway.selectedModel || '未选模型'}`;
+    }
+    els.aiLoginState.textContent = aiGateway.token
+      ? `已登录：${aiGateway.user?.phone || aiGateway.phone || ''}${aiGateway.user?.ai_enabled === false ? '（AI 权限已暂停）' : ''}`
+      : '未登录';
   }
 
   async function loadConfig() {
@@ -94,12 +118,20 @@
     els.detailDelayMax.value = adv.detailDelayMax || 4500;
 
     const aic = data.aiConfig || {};
-    aiProfiles = Array.isArray(aic.profiles) ? aic.profiles : [];
-    activeAiProfileId = aic.activeProfileId || aiProfiles[0]?.id || '';
+    aiGateway = {
+      baseUrl: aic.baseUrl || 'http://localhost:8787',
+      phone: aic.phone || '',
+      token: aic.token || '',
+      user: aic.user || null,
+      channels: Array.isArray(aic.channels) ? aic.channels : [],
+      selectedModel: aic.selectedModel || ''
+    };
     els.aiMode.value = aic.mode || 'off';
-    refreshAiProfileSelect();
-    loadAiProfileIntoForm(activeAiProfileId);
+    els.aiServerUrl.value = aiGateway.baseUrl;
+    els.aiPhone.value = aiGateway.phone;
+    refreshModelSelect();
     updateAiBadge();
+    if (aiGateway.token) await refreshGatewaySession(false).catch(() => {});
   }
 
   async function saveConfig(showToast = true) {
@@ -122,90 +154,112 @@
       detailDelayMin: detailMin, detailDelayMax: detailMax,
       erpExtensionId: ERP_EXTENSION_ID
     };
-    const aiConfig = { mode: els.aiMode.value, activeProfileId: activeAiProfileId, profiles: aiProfiles };
+    aiGateway.baseUrl = els.aiServerUrl.value.trim().replace(/\/+$/, '');
+    aiGateway.phone = els.aiPhone.value.trim();
+    aiGateway.selectedModel = els.aiModelSelect.value || aiGateway.selectedModel || '';
+    const aiConfig = {
+      mode: els.aiMode.value,
+      baseUrl: aiGateway.baseUrl,
+      phone: aiGateway.phone,
+      token: aiGateway.token,
+      user: aiGateway.user,
+      channels: aiGateway.channels,
+      selectedModel: aiGateway.selectedModel
+    };
     await storageSet({ formConfig, advancedConfig, aiConfig });
     updateAiBadge();
     if (showToast) toast('配置已保存');
     return { formConfig, advancedConfig, aiConfig };
   }
 
-  function refreshAiProfileSelect() {
-    els.aiProfileSelect.innerHTML = '';
-    if (!aiProfiles.length) {
-      const o = document.createElement('option'); o.value = ''; o.textContent = '暂无配置'; els.aiProfileSelect.appendChild(o); return;
+  function refreshModelSelect() {
+    const previous = aiGateway.selectedModel || els.aiModelSelect.value || '';
+    els.aiModelSelect.innerHTML = '';
+    let first = '';
+    for (const ch of aiGateway.channels || []) {
+      const group = document.createElement('optgroup');
+      group.label = ch.name || ch.id;
+      for (const m of ch.models || []) {
+        const o = document.createElement('option');
+        o.value = m.id;
+        o.textContent = `${m.name || m.model_id}${m.capabilities?.vision ? ' · 视觉' : ''}`;
+        if (!first) first = m.id;
+        if (m.id === previous) o.selected = true;
+        group.appendChild(o);
+      }
+      if (group.children.length) els.aiModelSelect.appendChild(group);
     }
-    for (const p of aiProfiles) {
-      const o = document.createElement('option'); o.value = p.id; o.textContent = `${p.name || '未命名'} · ${AI.PROVIDERS[p.provider]?.label || p.provider}`;
-      if (p.id === activeAiProfileId) o.selected = true;
-      els.aiProfileSelect.appendChild(o);
-    }
+    aiGateway.selectedModel = [...els.aiModelSelect.options].some(o => o.value === previous) ? previous : (first || '');
+    if (aiGateway.selectedModel) els.aiModelSelect.value = aiGateway.selectedModel;
   }
 
-  function loadAiProfileIntoForm(id) {
-    const p = aiProfiles.find(x => x.id === id);
-    if (!p) {
-      const preset = AI.PROVIDERS.openai;
-      els.aiProfileName.value = '';
-      els.aiProvider.value = 'openai'; els.aiBaseUrl.value = preset.baseUrl; els.aiModel.value = preset.model; els.aiApiKey.value = ''; els.aiApiPath.value = '';
-      return;
-    }
-    els.aiProfileName.value = p.name || '';
-    els.aiProvider.value = p.provider || 'openai';
-    els.aiBaseUrl.value = p.baseUrl || '';
-    els.aiModel.value = p.model || '';
-    els.aiApiKey.value = p.apiKey || '';
-    els.aiApiPath.value = p.apiPath || '';
-  }
-
-  function aiProfileFromForm(existingId = '') {
-    return {
-      id: existingId || profileId(),
-      name: els.aiProfileName.value.trim() || '未命名配置',
-      provider: els.aiProvider.value,
-      baseUrl: els.aiBaseUrl.value.trim(),
-      model: els.aiModel.value.trim(),
-      apiKey: els.aiApiKey.value.trim(),
-      apiPath: els.aiApiPath.value.trim()
-    };
-  }
-
-  async function saveAiProfile(asNew = false) {
-    const existing = !asNew ? (aiProfiles.find(x => x.id === activeAiProfileId)?.id || '') : '';
-    const p = aiProfileFromForm(existing);
-    if (!p.baseUrl || !p.model || !p.apiKey) return toast('请填写 Base URL、模型和 API Key');
+  async function requestLoginCode() {
+    const baseUrl = els.aiServerUrl.value.trim().replace(/\/+$/, '');
+    const phone = els.aiPhone.value.trim();
+    if (!baseUrl || !/^1[3-9]\d{9}$/.test(phone)) return toast('请填写 Relay 服务地址和正确手机号');
+    els.aiLoginState.textContent = '正在发送验证码…';
     try {
-      const granted = await AI.ensureOriginPermission(p, true);
-      if (!granted) return toast('未授予 AI API 域名访问权限');
-    } catch (e) { return toast(`域名权限失败：${e.message}`); }
-    const idx = aiProfiles.findIndex(x => x.id === p.id);
-    if (idx >= 0) aiProfiles[idx] = p; else aiProfiles.push(p);
-    activeAiProfileId = p.id;
-    await saveConfig(false);
-    refreshAiProfileSelect(); loadAiProfileIntoForm(activeAiProfileId); updateAiBadge();
-    toast(asNew ? '已新增 AI 配置' : 'AI 配置已保存');
+      const data = await AI.requestCode(baseUrl, phone);
+      aiGateway.baseUrl = baseUrl; aiGateway.phone = phone;
+      if (data?.delivery?.dev_code) els.aiLoginState.textContent = `本地 DEV 验证码：${data.delivery.dev_code}`;
+      else els.aiLoginState.textContent = '验证码已通过微信发送';
+      await saveConfig(false);
+    } catch (e) { els.aiLoginState.textContent = `发送失败：${e.message}`; }
   }
 
-  async function deleteAiProfile() {
-    if (!activeAiProfileId) return;
-    aiProfiles = aiProfiles.filter(x => x.id !== activeAiProfileId);
-    activeAiProfileId = aiProfiles[0]?.id || '';
-    await saveConfig(false); refreshAiProfileSelect(); loadAiProfileIntoForm(activeAiProfileId); updateAiBadge(); toast('AI 配置已删除');
-  }
-
-  async function testAiProfile() {
-    const p = aiProfileFromForm(activeAiProfileId || '');
-    els.aiTestResult.className = 'hint'; els.aiTestResult.textContent = '测试中…';
+  async function loginGateway() {
+    const baseUrl = els.aiServerUrl.value.trim().replace(/\/+$/, '');
+    const phone = els.aiPhone.value.trim();
+    const code = els.aiLoginCode.value.trim();
+    if (!baseUrl || !/^1[3-9]\d{9}$/.test(phone) || !/^\d{6}$/.test(code)) return toast('请填写服务地址、手机号和 6 位验证码');
+    els.aiLoginState.textContent = '登录中…';
     try {
-      const granted = await AI.ensureOriginPermission(p, true);
-      if (!granted) throw new Error('未授予域名权限');
-      const text = await AI.callText(p, '只返回 OK 两个字母。', '连通性测试。');
-      els.aiTestResult.className = 'hint ok'; els.aiTestResult.textContent = `连接成功：${String(text || '').trim().slice(0, 80) || '收到响应'}`;
+      const data = await AI.verifyCode(baseUrl, phone, code);
+      aiGateway = { ...aiGateway, baseUrl, phone, token: data.token || '', user: data.user || null };
+      els.aiLoginCode.value = '';
+      await refreshGatewaySession(false);
+      await saveConfig(false);
+      toast('AI Relay 登录成功');
+    } catch (e) { els.aiLoginState.textContent = `登录失败：${e.message}`; }
+  }
+
+  async function refreshGatewaySession(showToast = true) {
+    if (!aiGateway.token || !aiGateway.baseUrl) throw new Error('尚未登录 AI Relay');
+    const service = { baseUrl: aiGateway.baseUrl, token: aiGateway.token };
+    try {
+      const [me, models] = await Promise.all([AI.getMe(service), AI.getModels(service)]);
+      aiGateway.user = me.user || aiGateway.user;
+      aiGateway.channels = models.channels || [];
+      refreshModelSelect();
+      await saveConfig(false);
+      if (showToast) toast('模型列表已刷新');
+      return models;
     } catch (e) {
-      els.aiTestResult.className = 'hint err'; els.aiTestResult.textContent = `连接失败：${e.message}`;
+      if (/登录|过期|unauthorized|session/i.test(e.message)) {
+        aiGateway.token = ''; aiGateway.user = null; aiGateway.channels = []; aiGateway.selectedModel = '';
+        refreshModelSelect(); await saveConfig(false);
+      }
+      updateAiBadge();
+      throw e;
     }
   }
 
-  function activeAiProfile() { return aiProfiles.find(x => x.id === activeAiProfileId) || null; }
+  async function logoutGateway() {
+    const service = activeAiService() || { baseUrl: aiGateway.baseUrl, token: aiGateway.token };
+    if (aiGateway.token && aiGateway.baseUrl) await AI.logout(service).catch(() => {});
+    aiGateway.token = ''; aiGateway.user = null; aiGateway.channels = []; aiGateway.selectedModel = '';
+    refreshModelSelect(); await saveConfig(false); updateAiBadge(); toast('已退出 AI Relay');
+  }
+
+  async function testAiGateway() {
+    const service = activeAiService();
+    els.aiTestResult.className = 'hint'; els.aiTestResult.textContent = '测试中…';
+    if (!service) { els.aiTestResult.className = 'hint err'; els.aiTestResult.textContent = '请先登录并选择模型'; return; }
+    try {
+      const text = await AI.callText(service, '只返回 OK 两个字母。', '连通性测试。');
+      els.aiTestResult.className = 'hint ok'; els.aiTestResult.textContent = `推理成功：${String(text || '').trim().slice(0, 100)}`;
+    } catch (e) { els.aiTestResult.className = 'hint err'; els.aiTestResult.textContent = `推理失败：${e.message}`; }
+  }
 
   async function getTasks() {
     const { tasks = [] } = await storageGet(['tasks']);
@@ -365,9 +419,12 @@
     if (!keywords.length) return toast('请至少填写一个搜索关键词');
     const filter = R.parseFilterRules(formConfig.filterRules);
     const limits = R.parseLimitRules(formConfig.limitRules);
-    const profile = activeAiProfile();
-    const wantsAi = aiConfig.mode === 'fallback' && [formConfig.keywordsPrompt, formConfig.filterPrompt, formConfig.limitPrompt].some(v => String(v || '').trim());
-    if (wantsAi && !profile) return toast('已启用 AI 兜底并填写了备用提示词，但还没有可用的 AI 配置');
+    const service = activeAiService();
+    const modelInfo = selectedModelInfo();
+    const hasBackupPrompt = [formConfig.keywordsPrompt, formConfig.filterPrompt, formConfig.limitPrompt].some(v => String(v || '').trim());
+    const needsAiNow = aiConfig.mode === 'risk_required' || (aiBusinessEnabled(aiConfig.mode) && hasBackupPrompt);
+    if (needsAiNow && !service) return toast('当前 AI 模式需要 Relay，请先完成手机号登录并选择模型');
+    if (aiConfig.mode === 'risk_required' && !modelInfo?.capabilities?.vision) return toast('“风控图形验证码必须用 AI”需要选择服务端标记为“视觉”的模型');
 
     currentTask = {
       id: taskId(), createdAt: nowIso(), updatedAt: nowIso(), status: 'scanning',
@@ -376,16 +433,67 @@
         parsedFilter: filter,
         parsedLimits: limits,
         advanced: advancedConfig,
-        ai: { mode: aiConfig.mode, profileId: profile?.id || '', profileName: profile?.name || '', provider: profile?.provider || '', model: profile?.model || '' }
+        ai: {
+          mode: aiConfig.mode,
+          baseUrl: aiGateway.baseUrl,
+          model: aiGateway.selectedModel,
+          channelId: modelInfo?.channelId || '',
+          channelName: modelInfo?.channelName || '',
+          modelName: modelInfo?.name || modelInfo?.model_id || '',
+          vision: !!modelInfo?.capabilities?.vision
+        }
       },
       resolvedKeywords: null,
-      aiUsage: { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] },
+      aiUsage: { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] },
       cursor: { keywordIndex: 0, pageIndex: 0 }, candidates: [],
       log: [], error: null
     };
     await saveTask(currentTask);
     renderTask();
     await runScan(currentTask);
+  }
+
+  function taskAiService(task) {
+    const model = task.config?.ai?.model || '';
+    if (!model || !aiGateway.token || !aiGateway.baseUrl) return null;
+    if (task.config?.ai?.baseUrl && task.config.ai.baseUrl !== aiGateway.baseUrl) return null;
+    return { baseUrl: aiGateway.baseUrl, token: aiGateway.token, model };
+  }
+
+  async function analyzeAndPauseChallenge(task, tabId, phase, baseMessage) {
+    let message = baseMessage;
+    if (task.config?.ai?.mode === 'risk_required') {
+      const service = taskAiService(task);
+      const modelInfo = selectedModelInfo(task.config?.ai?.model);
+      if (!service) {
+        task.log.push({ at: nowIso(), type: 'risk-ai-required-but-unavailable', phase, error: 'AI Relay 登录会话不可用或服务地址已变化' });
+        message += '\n当前模式要求风控图形验证必须调用 AI，但 Relay 登录会话不可用。请重新登录后再继续。';
+      } else if (!modelInfo?.capabilities?.vision && !task.config?.ai?.vision) {
+        task.log.push({ at: nowIso(), type: 'risk-ai-required-but-no-vision-model', phase, model: task.config?.ai?.model });
+        message += '\n当前模式要求使用 AI，但任务绑定模型未标记视觉能力。请在服务端授权视觉模型并在插件中重新选择。';
+      } else {
+        setStatus('AI 识别风控验证', `模型：${task.config.ai.channelName || ''} / ${task.config.ai.modelName || task.config.ai.model}`, null);
+        try {
+          const tab = await chrome.tabs.get(tabId);
+          await chrome.tabs.update(tabId, { active: true });
+          await sleep(450);
+          const pageInfo = await send(tabId, { type: 'GET_CHALLENGE_INFO' }, 5000).catch(() => ({ challenge: true }));
+          const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 58 });
+          const result = await AI.inspectRiskChallenge(service, screenshot, pageInfo || {});
+          task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
+          task.aiUsage.calls++; task.aiUsage.riskCalls = (task.aiUsage.riskCalls || 0) + 1;
+          task.lastRiskChallenge = { ...result, phase, model: task.config.ai.model, at: nowIso() };
+          task.log.push({ at: nowIso(), type: 'risk-ai-inspection', phase, model: task.config.ai.model, result });
+          message += `\nAI 识别：${result.type}（置信度 ${Math.round((result.confidence || 0) * 100)}%）。${result.summary}\n请人工完成页面验证后点击“继续当前任务”。`;
+        } catch (e) {
+          task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
+          task.aiUsage.errors.push({ at: nowIso(), stage: 'risk-challenge', error: String(e?.message || e) });
+          task.log.push({ at: nowIso(), type: 'ai-error', stage: 'risk-challenge', phase, error: String(e?.message || e) });
+          message += `\n当前模式要求调用 AI；本次 AI 识别失败：${String(e?.message || e)}。任务不会绕过验证，请先修复 AI 配置或人工完成验证后再继续。`;
+        }
+      }
+    }
+    return pauseTask(task, message, phase);
   }
 
   async function runScan(task) {
@@ -397,20 +505,19 @@
       const filter = task.config.parsedFilter || R.parseFilterRules(task.config.filterRules);
       const limits = task.config.parsedLimits || R.parseLimitRules(task.config.limitRules);
       const adv = task.config.advanced || { navDelayMin: 3500, navDelayMax: 6500, detailDelayMin: 2200, detailDelayMax: 4500 };
-      const profile = aiProfiles.find(x => x.id === task.config?.ai?.profileId) || null;
+      const service = taskAiService(task);
       const explicitKeywords = R.splitLines(task.config.keywords);
       if (!task.resolvedKeywords) {
         let resolved = [...explicitKeywords];
-        if (task.config?.ai?.mode === 'fallback' && task.config.keywordsPrompt?.trim() && profile) {
-          setStatus('AI 补充搜索词', `使用配置：${profile.name} / ${profile.model}`, 1);
+        if (aiBusinessEnabled(task.config?.ai?.mode) && task.config.keywordsPrompt?.trim() && service) {
+          setStatus('AI 补充搜索词', `使用模型：${task.config.ai.channelName || ''} / ${task.config.ai.modelName || task.config.ai.model}`, 1);
           try {
-            const extra = await AI.expandKeywords(profile, explicitKeywords, task.config.keywordsPrompt);
-            task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] };
+            const extra = await AI.expandKeywords(service, explicitKeywords, task.config.keywordsPrompt);
+            task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
             task.aiUsage.calls++; task.aiUsage.keywordCalls++;
             for (const kw of extra) if (!resolved.some(x => x.toLowerCase() === kw.toLowerCase())) resolved.push(kw);
-            task.log.push({ at: nowIso(), type: 'ai-keywords', profileId: profile.id, model: profile.model, added: extra.length });
+            task.log.push({ at: nowIso(), type: 'ai-keywords', model: task.config.ai.model, added: extra.length });
           } catch (e) {
-            task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] };
             task.aiUsage.errors.push({ at: nowIso(), stage: 'keywords', error: String(e?.message || e) });
             task.log.push({ at: nowIso(), type: 'ai-error', stage: 'keywords', error: String(e?.message || e) });
           }
@@ -428,7 +535,7 @@
         setStatus('正在搜索', `关键词 ${ki + 1}/${keywords.length}：${kw}`, (ki / keywords.length) * 70);
         const before = (await chrome.tabs.get(tab.id)).url;
         const sr = await send(tab.id, { type: 'SEARCH_KEYWORD', keyword: kw });
-        if (sr?.challenge) return pauseTask(task, 'Temu 要求人机/安全验证。请在网页中手动完成验证后点击“继续当前任务”。');
+        if (sr?.challenge) return analyzeAndPauseChallenge(task, tab.id, 'scan', 'Temu 要求人机/安全验证。');
         if (!sr?.ok) throw new Error(sr?.error || '搜索失败');
         await waitAfterNavigation(tab.id, before).catch(async () => { await sleep(2200); });
         await sleep(randBetween(adv.navDelayMin, adv.navDelayMax));
@@ -441,7 +548,7 @@
           task.cursor = { keywordIndex: ki, pageIndex: pi };
           setStatus('扫描商品列表', `关键词：${kw}\n第 ${pi + 1}/${limits.maxPages} 页/批次，正在滚动并提取商品…`, ((ki + (pi / limits.maxPages)) / keywords.length) * 70);
           const scan = await send(tab.id, { type: 'SCAN_RESULTS', options: { maxProducts: remainingForKeyword, maxScrolls: limits.maxScrollsPerPage } }, 45000);
-          if (scan?.challenge) return pauseTask(task, '扫描过程中出现 Temu 人机/安全验证。完成验证后可继续。');
+          if (scan?.challenge) return analyzeAndPauseChallenge(task, tab.id, 'scan', '扫描过程中出现 Temu 人机/安全验证。');
           if (!scan?.ok) throw new Error(scan?.error || '扫描商品列表失败');
 
           let added = 0;
@@ -458,7 +565,7 @@
           if (reachedKeywordCap || !scan.hasNext || pi >= limits.maxPages - 1) break;
           const prev = (await chrome.tabs.get(tab.id)).url;
           const nx = await send(tab.id, { type: 'CLICK_NEXT' });
-          if (nx?.challenge) return pauseTask(task, '翻页时出现 Temu 验证。完成后继续。');
+          if (nx?.challenge) return analyzeAndPauseChallenge(task, tab.id, 'scan', '翻页时出现 Temu 人机/安全验证。');
           if (!nx?.ok) break;
           await waitAfterNavigation(tab.id, prev).catch(async () => { await sleep(2200); });
           await sleep(randBetween(adv.navDelayMin, adv.navDelayMax));
@@ -468,16 +575,17 @@
         await saveTask(task);
       }
 
-      await verifyDetails(task, filter, limits, registry, adv);
+      const detailCompleted = await verifyDetails(task, filter, limits, registry, adv);
+      if (detailCompleted === false || task.status === 'paused') return;
       await verifyWithAI(task);
+      if (task.status === 'paused') return;
       task.status = 'review'; task.cursor = null;
       await saveTask(task);
       setStatus('筛选完成', '请审核结果；确认后点击“执行采集”。', 100);
       renderTask();
     } catch (err) {
       if (err instanceof StopError) {
-        task.status = 'stopped';
-        task.error = null;
+        task.status = 'stopped'; task.error = null;
         await saveTask(task);
         setStatus('已停止', '任务已停止，临时数据已归档。', 100);
       } else {
@@ -493,19 +601,22 @@
 
   async function verifyDetails(task, filter, limits, registry, adv) {
     const pending = task.candidates.filter(c => c.decision === 'review').slice(0, limits.maxDetails);
-    if (!pending.length) return;
+    if (!pending.length) return true;
     for (let i = 0; i < pending.length; i++) {
       if (stopRequested) throw new StopError();
       const cand = pending[i];
       setStatus('打开详情确认', `${i + 1}/${pending.length}：${cand.title.slice(0, 70)}`, 70 + ((i + 1) / pending.length) * 25);
-      let tab;
+      let tab, keepTab = false;
       try {
         tab = await chrome.tabs.create({ url: cand.url, active: false });
         await waitTabReady(tab.id, 22000);
         const detail = await send(tab.id, { type: 'GET_DETAIL' }, 12000);
         if (detail?.challenge) {
           task.log.push({ at: nowIso(), type: 'detail-challenge', productId: cand.productId });
-          continue;
+          keepTab = true;
+          task.challengeTemporaryTabId = tab.id;
+          await analyzeAndPauseChallenge(task, tab.id, 'scan', `商品详情页出现 Temu 风控图形验证：${cand.title.slice(0, 60)}`);
+          return false;
         }
         if (!detail?.ok) continue;
         const merged = { ...cand, ...detail, title: detail.title || cand.title, image: cand.image };
@@ -515,22 +626,23 @@
       } catch (e) {
         task.log.push({ at: nowIso(), type: 'detail-error', productId: cand.productId, error: String(e?.message || e) });
       } finally {
-        if (tab?.id) await chrome.tabs.remove(tab.id).catch(() => {});
+        if (tab?.id && !keepTab) await chrome.tabs.remove(tab.id).catch(() => {});
       }
       await sleep(randBetween(adv?.detailDelayMin || 2200, adv?.detailDelayMax || 4500));
       await saveTask(task);
       renderTask();
     }
+    return true;
   }
 
   async function verifyWithAI(task) {
-    if (task.config?.ai?.mode !== 'fallback') return;
+    if (!aiBusinessEnabled(task.config?.ai?.mode)) return;
     const filterPrompt = task.config.filterPrompt?.trim() || '';
     const limitPrompt = task.config.limitPrompt?.trim() || '';
     if (!filterPrompt && !limitPrompt) return;
-    const profile = aiProfiles.find(x => x.id === task.config?.ai?.profileId);
-    if (!profile) {
-      task.log.push({ at: nowIso(), type: 'ai-skip', reason: '任务绑定的 AI 配置不存在' });
+    const service = taskAiService(task);
+    if (!service) {
+      task.log.push({ at: nowIso(), type: 'ai-skip', reason: '任务绑定的 AI Relay 登录会话不可用' });
       return;
     }
     const maxReviews = task.config?.parsedLimits?.maxDetails ?? 20;
@@ -538,20 +650,19 @@
     for (let i = 0; i < pending.length; i++) {
       if (stopRequested) throw new StopError();
       const cand = pending[i];
-      setStatus('AI 兜底复核', `${i + 1}/${pending.length} · ${profile.name} / ${profile.model}
-${cand.title.slice(0, 75)}`, 95 + ((i + 1) / Math.max(1, pending.length)) * 4);
+      setStatus('AI 兜底复核', `${i + 1}/${pending.length} · ${task.config.ai.channelName || ''} / ${task.config.ai.modelName || task.config.ai.model}\n${cand.title.slice(0, 75)}`, 95 + ((i + 1) / Math.max(1, pending.length)) * 4);
       try {
-        const result = await AI.reviewCandidate(profile, cand, { filterPrompt, limitPrompt });
-        task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] };
+        const result = await AI.reviewCandidate(service, cand, { filterPrompt, limitPrompt });
+        task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
         task.aiUsage.calls++; task.aiUsage.reviewCalls++;
-        cand.aiReview = { ...result, profileId: profile.id, profileName: profile.name, provider: profile.provider, model: profile.model, at: nowIso() };
+        cand.aiReview = { ...result, channel: task.config.ai.channelName, model: task.config.ai.model, at: nowIso() };
         cand.decision = result.decision;
         cand.selected = result.decision !== 'excluded';
         cand.reasons = [...(cand.reasons || []), ...(result.reasons || []).map(x => `AI兜底：${x}`)];
         if (result.decision !== 'review') cand.unknown = [];
-        task.log.push({ at: nowIso(), type: 'ai-review', productId: cand.productId, decision: result.decision, confidence: result.confidence, model: profile.model });
+        task.log.push({ at: nowIso(), type: 'ai-review', productId: cand.productId, decision: result.decision, confidence: result.confidence, model: task.config.ai.model });
       } catch (e) {
-        task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, errors: [] };
+        task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
         task.aiUsage.errors.push({ at: nowIso(), stage: 'review', productId: cand.productId, error: String(e?.message || e) });
         cand.aiReview = { error: String(e?.message || e), at: nowIso() };
         task.log.push({ at: nowIso(), type: 'ai-error', stage: 'review', productId: cand.productId, error: String(e?.message || e) });
@@ -574,6 +685,10 @@ ${cand.title.slice(0, 75)}`, 95 + ((i + 1) / Math.max(1, pending.length)) * 4);
   async function resumeTask() {
     if (!currentTask || currentTask.status !== 'paused') return;
     const phase = currentTask.pausePhase || 'scan';
+    if (currentTask.challengeTemporaryTabId) {
+      await chrome.tabs.remove(currentTask.challengeTemporaryTabId).catch(() => {});
+      currentTask.challengeTemporaryTabId = null;
+    }
     currentTask.error = null; currentTask.pausePhase = null;
     if (phase === 'collect') {
       currentTask.status = 'review';
@@ -608,7 +723,7 @@ ${cand.title.slice(0, 75)}`, 95 + ((i + 1) / Math.max(1, pending.length)) * 4);
         await waitTabReady(tab.id, 25000);
         const challenge = await send(tab.id, { type: 'CHECK_CHALLENGE' });
         if (challenge?.challenge) {
-          return pauseTask(currentTask, '采集过程中出现 Temu 人机/安全验证。请在网页中手动完成验证后点击“继续当前任务”，将从未完成商品继续。', 'collect');
+          return analyzeAndPauseChallenge(currentTask, tab.id, 'collect', '采集过程中出现 Temu 人机/安全验证。已完成商品不会重复执行。');
         }
         const res = await send(tab.id, { type: 'TRIGGER_ERP', options: { customSelector: selector, extensionId: ERP_EXTENSION_ID } }, 12000);
         if (!res?.ok) {
@@ -770,21 +885,18 @@ ${cand.title.slice(0, 75)}`, 95 + ((i + 1) / Math.max(1, pending.length)) * 4);
     el.addEventListener('change', () => saveConfig(false));
   }
   els.aiMode.addEventListener('change', () => saveConfig(false));
-  els.aiProfileSelect.addEventListener('change', async () => {
-    activeAiProfileId = els.aiProfileSelect.value;
-    loadAiProfileIntoForm(activeAiProfileId); updateAiBadge(); await saveConfig(false);
+  els.aiServerUrl.addEventListener('change', () => saveConfig(false));
+  els.aiPhone.addEventListener('change', () => saveConfig(false));
+  els.aiModelSelect.addEventListener('change', async () => {
+    aiGateway.selectedModel = els.aiModelSelect.value;
+    updateAiBadge();
+    await saveConfig(false);
   });
-  els.aiProvider.addEventListener('change', () => {
-    const preset = AI.PROVIDERS[els.aiProvider.value];
-    if (!preset) return;
-    els.aiBaseUrl.value = preset.baseUrl || '';
-    els.aiModel.value = preset.model || '';
-    els.aiApiPath.value = '';
-  });
-  els.aiSaveProfileBtn.addEventListener('click', () => saveAiProfile(false));
-  els.aiNewProfileBtn.addEventListener('click', () => saveAiProfile(true));
-  els.aiDeleteProfileBtn.addEventListener('click', deleteAiProfile);
-  els.aiTestBtn.addEventListener('click', testAiProfile);
+  els.aiSendCodeBtn.addEventListener('click', requestLoginCode);
+  els.aiLoginBtn.addEventListener('click', loginGateway);
+  els.aiLogoutBtn.addEventListener('click', logoutGateway);
+  els.aiRefreshModelsBtn.addEventListener('click', () => refreshGatewaySession(true).catch(e => toast(`刷新失败：${e.message}`)));
+  els.aiTestBtn.addEventListener('click', testAiGateway);
 
   (async function init() {
     await loadConfig();

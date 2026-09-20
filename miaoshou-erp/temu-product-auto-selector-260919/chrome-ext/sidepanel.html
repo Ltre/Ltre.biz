@@ -43,7 +43,7 @@
         <button id="resetBtn" class="ghost">恢复示例</button>
         <button id="scanBtn" class="primary">筛选</button>
       </div>
-      <p class="hint">默认优先使用本地确定性规则。只有启用了 AI 且对应备用提示词非空时，才会调用当前 AI 配置。检测到 Temu 验证会暂停，需人工完成后继续。</p>
+      <p class="hint">默认优先使用本地确定性规则。启用 AI 后仅在备用提示词需要或风控验证策略要求时调用服务端 Relay。检测到 Temu 验证会暂停，人工完成后可继续。</p>
     </section>
 
     <section id="statusCard" class="card status-card hidden">
@@ -92,45 +92,39 @@
         <label for="aiMode">AI 使用方式</label>
         <select id="aiMode">
           <option value="off">关闭（完全不调用）</option>
-          <option value="fallback">按需兜底（推荐）</option>
+          <option value="fallback">按需兜底（普通筛选需要时调用）</option>
+          <option value="risk_required">在出现风控图形验证码时必须用 AI</option>
         </select>
+        <p class="hint">“风控图形验证码必须用 AI”模式仍沿用普通筛选的按需兜底策略；检测到图形验证时会强制调用具备视觉能力的模型进行识别/分类，然后暂停等待人工完成验证。不会自动给出验证码答案或代替用户点击。</p>
 
-        <label for="aiProfileSelect">当前配置</label>
-        <select id="aiProfileSelect"></select>
+        <label for="aiServerUrl">AI Relay 服务地址</label>
+        <input id="aiServerUrl" type="text" placeholder="例如 https://ai.example.com 或 http://localhost:8787" />
 
         <div class="two-col">
           <div>
-            <label for="aiProfileName">配置名称</label>
-            <input id="aiProfileName" type="text" placeholder="例如 OpenAI-主账号" />
+            <label for="aiPhone">手机号</label>
+            <input id="aiPhone" type="tel" inputmode="numeric" placeholder="15911111111" />
           </div>
           <div>
-            <label for="aiProvider">平台</label>
-            <select id="aiProvider">
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="deepseek">DeepSeek</option>
-              <option value="custom_openai">自定义 OpenAI 兼容中转</option>
-            </select>
+            <label for="aiLoginCode">登录验证码</label>
+            <input id="aiLoginCode" type="text" inputmode="numeric" maxlength="6" placeholder="6 位验证码" />
           </div>
         </div>
-
-        <label for="aiBaseUrl">Base URL</label>
-        <input id="aiBaseUrl" type="text" placeholder="https://api.example.com" />
-        <label for="aiModel">模型</label>
-        <input id="aiModel" type="text" placeholder="模型 ID" />
-        <label for="aiApiKey">API Key</label>
-        <input id="aiApiKey" type="password" autocomplete="off" placeholder="保存在 Chrome 本地扩展存储中" />
-        <label for="aiApiPath">自定义 API Path（可留空）</label>
-        <input id="aiApiPath" type="text" placeholder="例如 /v1/chat/completions" />
         <div class="button-row compact">
-          <button id="aiSaveProfileBtn" class="secondary">保存/覆盖配置</button>
-          <button id="aiNewProfileBtn" class="ghost">另存为新配置</button>
-          <button id="aiDeleteProfileBtn" class="ghost danger-text">删除</button>
-          <button id="aiTestBtn" class="primary">测试连接</button>
+          <button id="aiSendCodeBtn" class="secondary">发送验证码</button>
+          <button id="aiLoginBtn" class="primary">登录</button>
+          <button id="aiLogoutBtn" class="ghost">退出登录</button>
+          <button id="aiRefreshModelsBtn" class="ghost">刷新模型</button>
+        </div>
+        <p id="aiLoginState" class="hint">未登录</p>
+
+        <label for="aiModelSelect">当前模型</label>
+        <select id="aiModelSelect"></select>
+        <div class="button-row compact">
+          <button id="aiTestBtn" class="secondary">测试推理</button>
         </div>
         <p id="aiTestResult" class="hint"></p>
-        <p class="hint">API Key 仅保存于本机 Chrome 的 <code>chrome.storage.local</code>，不会上传到本插件自建服务器（本插件也没有服务器）。浏览器扩展本地存储并不是独立密码保险箱，请按你的风险要求使用专用 Key/限额。</p>
+        <p class="hint">上游渠道、Base URL、API Key、额外鉴权头和用户模型权限均由服务端统一管理。插件只保存 Relay 地址、登录会话和所选模型，不再保存任何上游 API Key。</p>
       </details>
     </section>
 

@@ -1,0 +1,36 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "generic-ai-relay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-19",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "generic-ai-relay",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "AUDIT_BUCKET",
+      "bucket_name": "generic-ai-relay-audit"
+    }
+  ],
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "DEV_MODE": "true",
+    "WECHAT_DELIVERY": "mock",
+    "STORE_AI_PAYLOADS": "0",
+    "SESSION_TTL_DAYS": "30",
+    "OTP_TTL_MINUTES": "5",
+    "ALLOWED_ORIGINS": "*"
+  }
+}

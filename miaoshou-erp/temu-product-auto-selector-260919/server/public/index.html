@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>通用 AI Relay 管理</title><link rel="stylesheet" href="/style.css"></head><body>
+<header><div><h1>通用 AI Relay</h1><p>Cloudflare Worker · D1 · R2 · Workers AI · 通用渠道/模型权限</p></div><span id="health">未连接</span></header>
+<main>
+<section class="card"><h2>管理员登录</h2><div class="row"><input id="adminToken" type="password" placeholder="ADMIN_TOKEN"><button id="saveToken">保存本机</button><button id="refreshAll">刷新</button><button id="diagnostics">诊断 D1/R2/Workers AI</button></div><pre id="diag"></pre></section>
+<section class="card"><h2>渠道</h2><div class="grid"><input id="chName" placeholder="渠道名称"><input id="chSlug" placeholder="slug，例如 tencent-plan"><select id="chProtocol"><option value="openai_compat">OpenAI 兼容</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="workers_ai">Workers AI</option></select><input id="chBase" placeholder="Base URL"><input id="chPath" placeholder="API Path，可空"><input id="chKey" type="password" placeholder="API Key（服务端加密保存）"><textarea id="chHeaders" placeholder='额外请求头 JSON，例如 {"cf-aig-authorization":"Bearer ..."}'></textarea><button id="addChannel">新增渠道</button></div><div id="channels"></div></section>
+<section class="card"><h2>用户与模型权限</h2><div id="users"></div></section>
+<section class="card"><h2>用量统计</h2><div class="row"><input id="from" type="datetime-local"><input id="to" type="datetime-local"><button id="loadUsage">查询</button></div><div id="usage"></div></section>
+<section class="card"><h2>本地联调</h2><p>DEV_MODE 下可模拟公众号注册，用于 Wrangler 本地跑通“注册 → 验证码 → 登录 → 模型列表 → AI”。</p><div class="row"><input id="devPhone" placeholder="15911111111"><button id="devRegister">模拟 reg:手机号</button></div><pre id="devOut"></pre></section>
+</main><script src="/app.js"></script></body></html>

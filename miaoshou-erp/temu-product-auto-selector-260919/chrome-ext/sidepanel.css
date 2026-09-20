@@ -22,7 +22,7 @@ h2 { font-size: 15px; margin: 0; }
 main { padding: 10px; display: grid; gap: 10px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 12px; }
 label { display: block; font-weight: 650; margin: 9px 0 6px; }
-textarea, input[type="text"], input[type="number"], select { width: 100%; border: 1px solid #d7dbe0; border-radius: 8px; background: #fff; color: var(--text); padding: 9px 10px; font: inherit; outline: none; }
+textarea, input[type="text"], input[type="number"], input[type="password"], input[type="tel"], select { width: 100%; border: 1px solid #d7dbe0; border-radius: 8px; background: #fff; color: var(--text); padding: 9px 10px; font: inherit; outline: none; }
 textarea { resize: vertical; min-height: 70px; }
 textarea:focus, input:focus, select:focus { border-color: #ff9b72; box-shadow: 0 0 0 3px rgba(255,90,31,.10); }
 .button-row { display: flex; gap: 7px; margin-top: 11px; flex-wrap: wrap; }

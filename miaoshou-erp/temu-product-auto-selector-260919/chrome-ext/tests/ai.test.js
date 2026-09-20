@@ -1,22 +1,18 @@
-const fs = require('fs');
-const vm = require('vm');
 const assert = require('assert');
+const vm = require('vm');
+const fs = require('fs');
+const code = fs.readFileSync(require('path').join(__dirname, '../lib/ai.js'), 'utf8');
+const sandbox = { globalThis: {}, URL, console };
+vm.runInNewContext(code, sandbox);
+const AI = sandbox.globalThis.TemuAI;
 
-const ctx = {
-  chrome: { permissions: { contains: async () => true, request: async () => true } },
-  URL,
-  fetch: async () => { throw new Error('network must not be called in unit test'); }
-};
-ctx.globalThis = ctx;
-vm.createContext(ctx);
-vm.runInContext(fs.readFileSync(require('path').join(__dirname, '../lib/ai.js'), 'utf8'), ctx);
-
-const A = ctx.TemuAI;
-assert(A.PROVIDERS.openai);
-assert(A.PROVIDERS.anthropic);
-assert(A.PROVIDERS.gemini);
-assert(A.PROVIDERS.deepseek);
-assert(A.PROVIDERS.custom_openai);
-assert.deepStrictEqual(JSON.parse(JSON.stringify(A.parseJsonLoose('```json\n{"decision":"review"}\n```'))), { decision: 'review' });
-assert.deepStrictEqual(JSON.parse(JSON.stringify(A.parseJsonLoose('prefix ["a","b"] suffix'))), ['a', 'b']);
+assert.ok(AI);
+assert.deepStrictEqual(
+  JSON.parse(JSON.stringify(AI.parseJsonLoose('```json\n{"keywords":["iphone glass"]}\n```'))),
+  { keywords: ['iphone glass'] }
+);
+assert.deepStrictEqual(
+  JSON.parse(JSON.stringify(AI.parseJsonLoose('prefix {"decision":"review","confidence":0.4} suffix'))),
+  { decision: 'review', confidence: 0.4 }
+);
 console.log('ai.test.js: OK');

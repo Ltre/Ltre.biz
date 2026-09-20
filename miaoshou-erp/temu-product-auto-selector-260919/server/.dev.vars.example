@@ -1,0 +1,21 @@
+# Copy to .dev.vars for local Wrangler development.
+# Never commit real production values.
+ADMIN_TOKEN=replace-with-a-long-random-admin-token
+LOGIN_CODE_SECRET=replace-with-a-long-random-login-code-secret
+# 32 random bytes encoded as base64. Example generator:
+# node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+UPSTREAM_MASTER_KEY=replace-with-base64-32-byte-key
+
+# WeChat Official Account (optional in local mock mode)
+WECHAT_TOKEN=replace-with-wechat-server-token
+WECHAT_APPID=
+WECHAT_SECRET=
+# mock | official_account
+WECHAT_DELIVERY=mock
+
+# true/false-style string; local only should be true.
+DEV_MODE=true
+STORE_AI_PAYLOADS=0
+SESSION_TTL_DAYS=30
+OTP_TTL_MINUTES=5
+ALLOWED_ORIGINS=*
