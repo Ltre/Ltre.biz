@@ -217,6 +217,36 @@ async function adminAddModel(request, env, channelId) {
   requireAdmin(request,env); const b=await readJson(request); if(!b.model_id) throw err('model_id 必填'); const t=nowIso();
   const cap=JSON.stringify(b.capabilities||{}); const r=await env.DB.prepare(`INSERT INTO models(channel_id,model_id,display_name,enabled,capabilities_json,input_cost_per_million,output_cost_per_million,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`).bind(Number(channelId),b.model_id,b.display_name||b.model_id,b.enabled===false?0:1,cap,b.input_cost_per_million??null,b.output_cost_per_million??null,t,t).run(); return json({ok:true,id:r.meta?.last_row_id},201);
 }
+async function adminUpdateModel(request, env, modelPk) {
+  requireAdmin(request,env); const b=await readJson(request),sets=[],vals=[];
+  if('model_id' in b){sets.push('model_id=?');vals.push(String(b.model_id).trim());}
+  if('display_name' in b){sets.push('display_name=?');vals.push(b.display_name||null);}
+  if('enabled' in b){sets.push('enabled=?');vals.push(asBool(b.enabled)?1:0);}
+  if('capabilities' in b){sets.push('capabilities_json=?');vals.push(JSON.stringify(b.capabilities||{}));}
+  if('input_cost_per_million' in b){sets.push('input_cost_per_million=?');vals.push(b.input_cost_per_million==null?null:Number(b.input_cost_per_million));}
+  if('output_cost_per_million' in b){sets.push('output_cost_per_million=?');vals.push(b.output_cost_per_million==null?null:Number(b.output_cost_per_million));}
+  if(!sets.length) throw err('没有可更新字段');
+  sets.push('updated_at=?'); vals.push(nowIso(),Number(modelPk));
+  const r=await env.DB.prepare(`UPDATE models SET ${sets.join(',')} WHERE id=?`).bind(...vals).run();
+  if(!(Number(r.meta?.changes)>0)) throw err('模型不存在',404,'model_not_found');
+  return json({ok:true});
+}
+async function adminDeleteModel(request, env, modelPk) {
+  requireAdmin(request,env);
+  const used=await env.DB.prepare('SELECT COUNT(*) n FROM usage_logs WHERE model_pk=?').bind(Number(modelPk)).first();
+  if(Number(used?.n||0)>0) throw err('该模型已有调用记录，无法删除；如需停用请使用启用/停用开关',409,'model_has_usage');
+  const r=await env.DB.prepare('DELETE FROM models WHERE id=?').bind(Number(modelPk)).run();
+  if(!(Number(r.meta?.changes)>0)) throw err('模型不存在',404,'model_not_found');
+  return json({ok:true});
+}
+async function adminDeleteChannel(request, env, channelId) {
+  requireAdmin(request,env);
+  const used=await env.DB.prepare('SELECT COUNT(*) n FROM usage_logs WHERE channel_id=?').bind(Number(channelId)).first();
+  if(Number(used?.n||0)>0) throw err('该渠道已有调用记录，无法删除；如需停用请使用启用/停用开关',409,'channel_has_usage');
+  const r=await env.DB.prepare('DELETE FROM channels WHERE id=?').bind(Number(channelId)).run();
+  if(!(Number(r.meta?.changes)>0)) throw err('渠道不存在',404,'channel_not_found');
+  return json({ok:true});
+}
 async function adminUsage(request, env, url) {
   requireAdmin(request,env); const from=url.searchParams.get('from')||'1970-01-01T00:00:00.000Z', to=url.searchParams.get('to')||'2999-12-31T23:59:59.999Z', userId=url.searchParams.get('user_id');
   const where=['l.created_at>=?','l.created_at<=?'],bind=[from,to]; if(userId){where.push('l.user_id=?');bind.push(Number(userId));}
@@ -249,8 +279,13 @@ async function route(request, env) {
   let m=p.match(/^\/api\/admin\/users\/(\d+)$/); if(m&&request.method==='PATCH') return adminPatchUser(request,env,m[1]);
   m=p.match(/^\/api\/admin\/users\/(\d+)\/permissions$/); if(m&&request.method==='PUT') return adminPermissions(request,env,m[1]);
   if(p==='/api/admin/channels'&&(request.method==='GET'||request.method==='POST')) return adminChannels(request,env);
-  m=p.match(/^\/api\/admin\/channels\/(\d+)$/); if(m&&request.method==='PATCH') return adminPatchChannel(request,env,m[1]);
+  m=p.match(/^\/api\/admin\/channels\/(\d+)$/);
+  if(m&&request.method==='PATCH') return adminPatchChannel(request,env,m[1]);
+  if(m&&request.method==='DELETE') return adminDeleteChannel(request,env,m[1]);
   m=p.match(/^\/api\/admin\/channels\/(\d+)\/models$/); if(m&&request.method==='POST') return adminAddModel(request,env,m[1]);
+  m=p.match(/^\/api\/admin\/models\/(\d+)$/);
+  if(m&&request.method==='PATCH') return adminUpdateModel(request,env,m[1]);
+  if(m&&request.method==='DELETE') return adminDeleteModel(request,env,m[1]);
   if(p==='/api/admin/usage'&&request.method==='GET') return adminUsage(request,env,url);
   if(p==='/api/admin/diagnostics'&&request.method==='POST') return adminDiagnostics(request,env);
   if(p==='/api/dev/register'&&request.method==='POST') return devRegister(request,env);

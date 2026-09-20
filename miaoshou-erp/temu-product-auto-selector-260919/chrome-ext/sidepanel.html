@@ -43,7 +43,7 @@
         <button id="resetBtn" class="ghost">恢复示例</button>
         <button id="scanBtn" class="primary">筛选</button>
       </div>
-      <p class="hint">默认优先使用本地确定性规则。启用 AI 后仅在备用提示词需要或风控验证策略要求时调用服务端 Relay。检测到 Temu 验证会暂停，人工完成后可继续。</p>
+      <p class="hint">默认优先使用本地确定性规则。启用 AI 后仅在备用提示词需要或风控验证策略要求时调用服务端 Relay。检测到 Temu 风控验证时，会调用所选视觉模型自动识别并完成验证（滑块/点选/输入文字）；AI 不可用或多次自动处理失败时暂停等待人工处理。</p>
     </section>
 
     <section id="statusCard" class="card status-card hidden">
@@ -68,7 +68,9 @@
         <label class="switchline"><input type="checkbox" id="showExcluded" /> 显示已排除</label>
       </div>
       <div class="button-row sticky-actions">
-        <button id="selectAllBtn" class="secondary">全选可采集</button>
+        <button id="selectAllBtn" class="secondary">全选</button>
+        <button id="invertSelectBtn" class="secondary">反选</button>
+        <button id="clearSelectBtn" class="secondary">取消选择</button>
         <button id="collectBtn" class="primary">执行采集</button>
         <button id="exportBtn" class="ghost">导出JSON</button>
       </div>
@@ -95,7 +97,7 @@
           <option value="fallback">按需兜底（普通筛选需要时调用）</option>
           <option value="risk_required">在出现风控图形验证码时必须用 AI</option>
         </select>
-        <p class="hint">“风控图形验证码必须用 AI”模式仍沿用普通筛选的按需兜底策略；检测到图形验证时会强制调用具备视觉能力的模型进行识别/分类，然后暂停等待人工完成验证。不会自动给出验证码答案或代替用户点击。</p>
+        <p class="hint">“风控图形验证码必须用 AI”模式：出现风控验证时强制调用具备视觉能力的模型识别并自动完成验证操作（拖动滑块、点击目标图片、输入文字），自动尝试多次失败后暂停等待人工处理。普通筛选仍沿用按需兜底策略。</p>
 
         <label for="aiServerUrl">AI Relay 服务地址</label>
         <input id="aiServerUrl" type="text" placeholder="例如 https://ai.example.com 或 http://localhost:8787" />
@@ -143,7 +145,7 @@
           <div><label for="detailDelayMin">详情页间最短等待(ms)</label><input id="detailDelayMin" type="number" min="1000" max="60000" step="100" value="2200" /></div>
           <div><label for="detailDelayMax">最长等待(ms)</label><input id="detailDelayMax" type="number" min="1000" max="60000" step="100" value="4500" /></div>
         </div>
-        <p class="hint">这些等待用于降低请求密度、给页面充分加载时间。插件不会自动破解 CAPTCHA/滑块，也不会伪造鼠标轨迹、指纹或其它绕过反爬验证的行为；发现验证时会暂停任务。</p>
+        <p class="hint">这些等待用于降低请求密度、给页面充分加载时间。检测到风控验证时插件会调用所选视觉模型自动识别并完成验证操作；未启用 AI 或自动处理多次失败时会暂停任务等待人工处理。插件不会伪造浏览器指纹或其它环境信息。</p>
       </details>
     </section>
   </main>

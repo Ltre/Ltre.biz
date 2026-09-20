@@ -78,7 +78,7 @@ npx wrangler secret put UPSTREAM_MASTER_KEY
 npx wrangler secret put WECHAT_TOKEN
 npx wrangler secret put WECHAT_APPID
 npx wrangler secret put WECHAT_SECRET
-npx wrangler d1 migrations apply AI_RELAY_DB --remote
+npx wrangler d1 migrations apply DB --remote
 npx wrangler deploy
 ```
 
@@ -86,12 +86,15 @@ npx wrangler deploy
 
 当前轻量后台支持：
 
-- 渠道创建（厂商直连、云平台、中转均视为“渠道”）。
-- 为渠道登记模型 ID、视觉能力、输入/输出成本。
+- 渠道创建/编辑/删除（厂商直连、云平台、中转均视为“渠道”）。
+- 渠道启用/停用开关（决定该渠道下模型是否对用户可见可用）。
+- 为渠道登记模型 ID、视觉能力、输入/输出成本；已登记模型支持编辑、删除、启用/停用。
 - 查看用户 AI 权限状态并启用/暂停。
 - 按用户勾选允许使用的具体渠道模型。
 - 按时间范围统计调用次数、输入/输出/总 Token、估算费用、错误数。
 - D1 / R2 / Workers AI 一键诊断。
+
+模型与渠道的 `enabled` 开关都会直接影响用户侧：停用的渠道/模型不会再出现在用户的模型列表里，直接调用也会被拒绝（403）。有调用记录的渠道不能删除，只能停用，避免破坏用量统计外键。
 
 ## 关于 sub2api
 

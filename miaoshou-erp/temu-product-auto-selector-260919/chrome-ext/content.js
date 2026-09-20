@@ -37,6 +37,65 @@
     return false;
   }
 
+  function findChallengeElements() {
+    const out = [];
+    const seen = new Set();
+    const push = (role, el) => {
+      if (!el || seen.has(el)) return;
+      const count = out.filter(e => e.role === role).length;
+      if (count >= 30) return;
+      seen.add(el);
+      const r = el.getBoundingClientRect();
+      out.push({
+        role,
+        index: count,
+        rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+        text: textOf(el).slice(0, 120),
+        tag: el.tagName
+      });
+    };
+    const captchaSel = '[id*="captcha" i],[class*="captcha" i],[id*="challenge" i],[class*="challenge" i],[id*="verify" i],[class*="verify" i],[class*="slider" i],[class*="slide" i],[class*="nc_" i]';
+    let containers = [];
+    try { containers = Array.from(document.querySelectorAll(captchaSel)).filter(visible); } catch (_) {}
+    const roots = containers.length ? containers : [document.body];
+
+    for (const root of roots) {
+      try {
+        // 滑块手柄
+        for (const el of Array.from(root.querySelectorAll('[class*="slider" i],[class*="slide" i],[class*="drag" i],[class*="handle" i],[class*="iconfont" i],[class*="btn" i],[class*="nc_" i],img,span,div'))) {
+          if (!visible(el)) continue;
+          const cls = `${el.className || ''} ${el.id || ''}`;
+          if (/(slider|slide|drag|handle|nc_iconfont|btn_slide|move|icon)/i.test(cls) && el.closest(captchaSel)) push('slider_handle', el);
+        }
+        // 滑块轨道 / 背景条
+        for (const el of Array.from(root.querySelectorAll('[class*="slider" i],[class*="slide" i],[class*="track" i],[class*="bg" i],[class*="bar" i]'))) {
+          if (!visible(el)) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width >= 120 && r.height <= 90 && /(slider|slide|track|bg|bar)/i.test(`${el.className || ''} ${el.id || ''}`)) push('slider_track', el);
+        }
+        // 点选图片网格
+        const gridSel = '[id*="click" i],[class*="click" i],[id*="select" i],[class*="select" i],[id*="grid" i],[class*="grid" i],[id*="captcha" i],[class*="captcha" i]';
+        let grids = [];
+        try { grids = Array.from(root.querySelectorAll(gridSel)).filter(visible); } catch (_) {}
+        for (const g of grids.length ? grids : [root]) {
+          for (const img of Array.from(g.querySelectorAll('img'))) if (visible(img)) push('grid_item', img);
+        }
+        // 文字输入框
+        for (const input of Array.from(root.querySelectorAll('input[type="text"],input:not([type]),input[type="tel"],input[type="number"],input[type="password"]'))) {
+          if (visible(input)) push('text_input', input);
+        }
+        // 确认/验证按钮
+        for (const btn of Array.from(root.querySelectorAll('button,[role="button"],input[type="submit"],a'))) {
+          if (!visible(btn)) continue;
+          const t = textOf(btn).trim();
+          if (!t || t.length > 30) continue;
+          if (/^(?:验证|确定|确认|完成|提交|开始验证|立即验证|verify|confirm|submit|ok|done|continue|开始)$/i.test(t)) push('button', btn);
+        }
+      } catch (_) {}
+    }
+    return out;
+  }
+
   function challengeInfo() {
     const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 9000);
     const iframes = Array.from(document.querySelectorAll('iframe')).filter(visible).map(f => ({
@@ -58,7 +117,7 @@
     if (/slider|滑块|拖动|drag/.test(probe)) hint = 'slider';
     else if (/select .*image|请选择.*图|图片|image captcha|click .*image/.test(probe)) hint = 'image_click_or_grid';
     else if (/captcha|验证码/.test(probe)) hint = 'captcha';
-    return { ok: true, challenge: isChallengePage(), hint, url: location.href, title: document.title, text: bodyText, iframes, markers };
+    return { ok: true, challenge: isChallengePage(), hint, url: location.href, title: document.title, text: bodyText, iframes, markers, elements: findChallengeElements() };
   }
 
   function findSearchInput() {
@@ -425,6 +484,75 @@
     return { ok: true, triggered: true, confirmed, source: hit.source, text: hit.txt || textOf(hit.el) };
   }
 
+  function clickEl(el) {
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const opts = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window, button: 0 };
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+      try { el.dispatchEvent(new PointerEvent(type, opts)); } catch (_) {}
+      try { el.dispatchEvent(new MouseEvent(type, opts)); } catch (_) {}
+    }
+    try { el.click(); } catch (_) {}
+  }
+
+  async function dragElTo(handle, track, fraction) {
+    const hr = handle.getBoundingClientRect();
+    const tr = track ? track.getBoundingClientRect() : null;
+    const startX = hr.left + hr.width / 2, startY = hr.top + hr.height / 2;
+    let travel;
+    if (tr) travel = tr.width * fraction - (hr.left - tr.left) - hr.width / 2;
+    else travel = hr.width * fraction;
+    travel = Math.max(0, travel);
+    const targetX = startX + travel, targetY = startY;
+    const opts = (x, y) => ({ bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window, button: 0, buttons: 1 });
+    try { handle.dispatchEvent(new PointerEvent('pointerdown', opts(startX, startY))); } catch (_) {}
+    handle.dispatchEvent(new MouseEvent('mousedown', opts(startX, startY)));
+    await sleep(100);
+    const steps = 20;
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const x = startX + (targetX - startX) * t;
+      const y = startY + Math.sin(t * Math.PI) * 3;
+      try { handle.dispatchEvent(new PointerEvent('pointermove', opts(x, y))); } catch (_) {}
+      document.dispatchEvent(new MouseEvent('mousemove', opts(x, y)));
+      window.dispatchEvent(new MouseEvent('mousemove', opts(x, y)));
+      await sleep(18 + Math.random() * 30);
+    }
+    try { handle.dispatchEvent(new PointerEvent('pointerup', opts(targetX, targetY))); } catch (_) {}
+    handle.dispatchEvent(new MouseEvent('mouseup', opts(targetX, targetY)));
+    await sleep(200);
+  }
+
+  function findByElementId(els, id) {
+    const [role, idx] = String(id || '').split(':');
+    return (els || []).find(e => e.role === role && e.index === Number(idx));
+  }
+
+  async function solveChallengeDOM(solution) {
+    solution = solution || {};
+    const els = findChallengeElements();
+    const action = solution.action || 'none';
+    if (action === 'drag_slider') {
+      const handle = findByElementId(els, solution.target_element_ids?.[0]) || els.find(e => e.role === 'slider_handle');
+      const track = els.find(e => e.role === 'slider_track');
+      if (!handle) return { ok: false, error: '未找到滑块手柄元素', elements: els };
+      await dragElTo(handle, track, Math.max(0, Math.min(1, Number(solution.slider_target_fraction) || 0.5)));
+    } else if (action === 'click_points' || action === 'click_button') {
+      const ids = Array.isArray(solution.target_element_ids) ? solution.target_element_ids : [];
+      for (const id of ids) {
+        const el = findByElementId(els, id);
+        if (el) { clickEl(el); await sleep(300); }
+      }
+    } else if (action === 'type_text') {
+      const input = findByElementId(els, solution.target_element_ids?.[0]) || els.find(e => e.role === 'text_input');
+      if (!input) return { ok: false, error: '未找到验证码输入框', elements: els };
+      input.focus();
+      nativeSetValue(input, String(solution.text || ''));
+    }
+    await sleep(1300);
+    return { ok: true, still_challenge: isChallengePage(), elements: els };
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     (async () => {
       switch (msg?.type) {
@@ -436,6 +564,7 @@
         case 'TRIGGER_ERP': return triggerErp(msg.options);
         case 'CHECK_CHALLENGE': return { ok: true, challenge: isChallengePage() };
         case 'GET_CHALLENGE_INFO': return challengeInfo();
+        case 'SOLVE_CHALLENGE': return solveChallengeDOM(msg.solution);
         default: return { ok: false, error: 'Unknown message type' };
       }
     })().then(sendResponse).catch(err => sendResponse({ ok: false, error: String(err?.message || err) }));

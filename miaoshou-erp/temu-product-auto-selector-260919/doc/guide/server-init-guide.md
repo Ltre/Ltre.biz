@@ -23,7 +23,7 @@
 
 可以。你这版 `server/` 实际上已经是一个可以独立运行的 **Cloudflare Worker + D1 + R2 + AI Relay 管理后台**。你完全不会 Wrangler 没关系，先按“本地 mock → Cloudflare 正式环境 → 最后接微信”的顺序做最容易。
 
-先提醒一个我刚检查代码发现的小问题：`wrangler.jsonc` 里 D1 binding 实际叫 **`DB`**，但 `package.json` 的两个 migration 命令写成了 `AI_RELAY_DB`。所以暂时不要直接执行 `npm run db:migrate:local`，下面我给你的命令会直接用正确的 `DB`。
+> 说明：旧版曾有一个小问题——`wrangler.jsonc` 里 D1 binding 叫 **`DB`**，但 `package.json` 的两个 migration 命令写成了 `AI_RELAY_DB`。当前版本（v1.3.0 起）已在 `package.json` 中修正为与 `DB` 一致，因此现在直接执行 `npm run db:migrate:local` / `npm run db:migrate:remote` 即可，无需再绕道手写命令。
 
 ## 一、这个 server 到底需要配置哪些东西？
 
@@ -408,6 +408,8 @@ vision=true
 ```
 
 否则插件会拒绝进入这个模式。
+
+当前版本每个已登记的模型都自带编辑/删除和启用/停用按钮：改模型 ID、显示名、视觉勾选、输入/输出成本后点“保存”；点“停用”后该模型会立刻从所有用户的模型列表消失、直接调用也会被拒绝，等于不再给用户使用；点“删除”会连同该模型的用户授权一起移除（已有调用记录的模型不能删除，只能停用，以保留用量统计）。
 
 如果只是想先测试整个 Server，Cloudflare Workers AI 也可以作为一个渠道：
 
@@ -1042,21 +1044,14 @@ api.weixin.qq.com/message/custom/send
 
 第一个就是前面发现的 `package.json`：
 
-现在：
-
-```json
-"db:migrate:local": "wrangler d1 migrations apply AI_RELAY_DB --local",
-"db:migrate:remote": "wrangler d1 migrations apply AI_RELAY_DB --remote"
-```
-
-应该改成：
+当前版本（v1.3.0 起）已经修正为与 `wrangler.jsonc` 的 D1 binding（`DB`）一致：
 
 ```json
 "db:migrate:local": "wrangler d1 migrations apply DB --local",
 "db:migrate:remote": "wrangler d1 migrations apply DB --remote"
 ```
 
-修完以后你以后就可以简单执行：
+因此现在可以直接执行：
 
 ```powershell
 npm run db:migrate:local

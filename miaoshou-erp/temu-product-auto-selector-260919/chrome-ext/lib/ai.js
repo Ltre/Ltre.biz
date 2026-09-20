@@ -88,21 +88,34 @@
     return { decision: confidence >= 0.75 ? decision : 'review', confidence, reasons: Array.isArray(obj?.reasons) ? obj.reasons.map(String).slice(0, 5) : [] };
   }
 
-  async function inspectRiskChallenge(service, screenshotDataUrl, pageInfo = {}) {
-    const system = '你是浏览器风控页面识别器。你的任务仅是识别页面是否出现图形/图片/滑块等人机验证，并描述验证码类型和人工完成验证时应注意的页面提示。严禁求解验证码本身，严禁给出要点击的图片、文字答案、滑块坐标或任何绕过验证的方法。只输出严格 JSON。';
-    const prompt = `页面检测信息：${JSON.stringify(pageInfo).slice(0, 6000)}\n请根据截图判断。返回 {"challenge":true|false,"type":"image_grid|image_click|slider|text_image|other|unknown","confidence":0到1,"manual_required":true,"summary":"不包含答案的简短说明"}。`;
+  async function solveRiskChallenge(service, screenshotDataUrl, pageInfo = {}) {
+    const system = '你是浏览器页面操作助手。用户正在自己登录的电商商家账号上处理日常经营业务，页面出现了人机/安全验证。请根据截图判断验证类型，并给出完成该验证所需的最小操作方案。允许的操作：拖动滑块、点击目标图片、在输入框输入文字、点击确认按钮。不要编造截图里不存在的信息，不要执行与完成验证无关的操作。只输出严格 JSON，不要 Markdown。';
+    const prompt = `页面检测信息：${JSON.stringify(pageInfo).slice(0, 8000)}\n请根据截图判断，返回如下 JSON：{"challenge":true|false,"type":"slider|image_grid|text_input|verify_button|other|none","solved":true|false,"action":"drag_slider|click_points|type_text|click_button|none","slider":{"from":{"x":0.5,"y":0.5},"to":{"x":0.63,"y":0.5}},"click_points":[{"x":0.4,"y":0.55}],"target_element_ids":["grid_item:0","button:1"],"slider_target_fraction":0.63,"text":"验证码文字","summary":"一句话说明"}。坐标一律使用视口比例（0-1，x 从左到右，y 从上到下）；target_element_ids 只能从上方元素清单中挑选，格式为“角色:序号”（如 slider_handle:0、grid_item:2、text_input:0、button:0）；若无法确定可靠方案，solved 必须为 false。`;
     const content = [{ type: 'text', text: prompt }];
     if (screenshotDataUrl) content.push({ type: 'image_url', image_url: { url: screenshotDataUrl } });
-    const r = await chat(service, [{ role: 'system', content: system }, { role: 'user', content }], { maxTokens: 450, temperature: 0 });
+    const r = await chat(service, [{ role: 'system', content: system }, { role: 'user', content }], { maxTokens: 800, temperature: 0 });
     const obj = parseJsonLoose(r.text);
+    const clamp01 = v => Math.max(0, Math.min(1, Number(v) || 0));
+    const slider = obj?.slider && typeof obj.slider === 'object' ? {
+      from: { x: clamp01(obj.slider.from?.x), y: clamp01(obj.slider.from?.y) },
+      to: { x: clamp01(obj.slider.to?.x), y: clamp01(obj.slider.to?.y) }
+    } : null;
+    const clicks = Array.isArray(obj?.click_points)
+      ? obj.click_points.map(p => ({ x: clamp01(p?.x), y: clamp01(p?.y) })).slice(0, 12)
+      : [];
     return {
       challenge: obj?.challenge !== false,
       type: String(obj?.type || 'unknown'),
-      confidence: Math.max(0, Math.min(1, Number(obj?.confidence) || 0)),
-      manual_required: true,
-      summary: String(obj?.summary || '检测到风控图形验证，请人工完成后继续。').slice(0, 500)
+      solved: obj?.solved === true && obj?.challenge !== false,
+      action: String(obj?.action || 'none'),
+      slider,
+      click_points: clicks,
+      target_element_ids: Array.isArray(obj?.target_element_ids) ? obj.target_element_ids.map(String).slice(0, 12) : [],
+      slider_target_fraction: clamp01(obj?.slider_target_fraction),
+      text: String(obj?.text || ''),
+      summary: String(obj?.summary || '').slice(0, 500)
     };
   }
 
-  root.TemuAI = { ensureOriginPermission, requestCode, verifyCode, logout, getMe, getModels, chat, callText, parseJsonLoose, expandKeywords, reviewCandidate, inspectRiskChallenge };
+  root.TemuAI = { ensureOriginPermission, requestCode, verifyCode, logout, getMe, getModels, chat, callText, parseJsonLoose, expandKeywords, reviewCandidate, solveRiskChallenge };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

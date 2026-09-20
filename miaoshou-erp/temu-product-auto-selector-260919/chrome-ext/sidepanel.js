@@ -20,7 +20,7 @@
     statusCard: $('statusCard'), statusTitle: $('statusTitle'), taskId: $('taskId'), progressBar: $('progressBar'), statusText: $('statusText'),
     resumeBtn: $('resumeBtn'), stopBtn: $('stopBtn'),
     resultsCard: $('resultsCard'), resultCounts: $('resultCounts'), resultList: $('resultList'), showExcluded: $('showExcluded'),
-    selectAllBtn: $('selectAllBtn'), collectBtn: $('collectBtn'), exportBtn: $('exportBtn'),
+    selectAllBtn: $('selectAllBtn'), invertSelectBtn: $('invertSelectBtn'), clearSelectBtn: $('clearSelectBtn'), collectBtn: $('collectBtn'), exportBtn: $('exportBtn'),
     taskHistory: $('taskHistory'), loadTaskBtn: $('loadTaskBtn'), deleteTaskBtn: $('deleteTaskBtn'),
     erpSelector: $('erpSelector'), collectDelay: $('collectDelay'), navDelayMin: $('navDelayMin'), navDelayMax: $('navDelayMax'), detailDelayMin: $('detailDelayMin'), detailDelayMax: $('detailDelayMax'),
     aiMode: $('aiMode'), aiBadge: $('aiBadge'), aiServerUrl: $('aiServerUrl'), aiPhone: $('aiPhone'), aiLoginCode: $('aiLoginCode'), aiSendCodeBtn: $('aiSendCodeBtn'), aiLoginBtn: $('aiLoginBtn'), aiLogoutBtn: $('aiLogoutBtn'), aiRefreshModelsBtn: $('aiRefreshModelsBtn'), aiLoginState: $('aiLoginState'), aiModelSelect: $('aiModelSelect'), aiTestBtn: $('aiTestBtn'), aiTestResult: $('aiTestResult'),
@@ -460,40 +460,145 @@
     return { baseUrl: aiGateway.baseUrl, token: aiGateway.token, model };
   }
 
-  async function analyzeAndPauseChallenge(task, tabId, phase, baseMessage) {
-    let message = baseMessage;
-    if (task.config?.ai?.mode === 'risk_required') {
-      const service = taskAiService(task);
-      const modelInfo = selectedModelInfo(task.config?.ai?.model);
-      if (!service) {
-        task.log.push({ at: nowIso(), type: 'risk-ai-required-but-unavailable', phase, error: 'AI Relay 登录会话不可用或服务地址已变化' });
-        message += '\n当前模式要求风控图形验证必须调用 AI，但 Relay 登录会话不可用。请重新登录后再继续。';
-      } else if (!modelInfo?.capabilities?.vision && !task.config?.ai?.vision) {
-        task.log.push({ at: nowIso(), type: 'risk-ai-required-but-no-vision-model', phase, model: task.config?.ai?.model });
-        message += '\n当前模式要求使用 AI，但任务绑定模型未标记视觉能力。请在服务端授权视觉模型并在插件中重新选择。';
-      } else {
-        setStatus('AI 识别风控验证', `模型：${task.config.ai.channelName || ''} / ${task.config.ai.modelName || task.config.ai.model}`, null);
-        try {
-          const tab = await chrome.tabs.get(tabId);
-          await chrome.tabs.update(tabId, { active: true });
-          await sleep(450);
-          const pageInfo = await send(tabId, { type: 'GET_CHALLENGE_INFO' }, 5000).catch(() => ({ challenge: true }));
-          const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 58 });
-          const result = await AI.inspectRiskChallenge(service, screenshot, pageInfo || {});
-          task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
-          task.aiUsage.calls++; task.aiUsage.riskCalls = (task.aiUsage.riskCalls || 0) + 1;
-          task.lastRiskChallenge = { ...result, phase, model: task.config.ai.model, at: nowIso() };
-          task.log.push({ at: nowIso(), type: 'risk-ai-inspection', phase, model: task.config.ai.model, result });
-          message += `\nAI 识别：${result.type}（置信度 ${Math.round((result.confidence || 0) * 100)}%）。${result.summary}\n请人工完成页面验证后点击“继续当前任务”。`;
-        } catch (e) {
-          task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
-          task.aiUsage.errors.push({ at: nowIso(), stage: 'risk-challenge', error: String(e?.message || e) });
-          task.log.push({ at: nowIso(), type: 'ai-error', stage: 'risk-challenge', phase, error: String(e?.message || e) });
-          message += `\n当前模式要求调用 AI；本次 AI 识别失败：${String(e?.message || e)}。任务不会绕过验证，请先修复 AI 配置或人工完成验证后再继续。`;
+  async function attachDebugger(tabId) {
+    try {
+      await chrome.debugger.attach({ tabId }, '1.3');
+    } catch (e) {
+      throw new Error('无法附加调试器（可能已打开开发者工具），将改用页面内自动化。');
+    }
+    return true;
+  }
+  async function detachDebugger(tabId) {
+    return chrome.debugger.detach({ tabId }).catch(() => {});
+  }
+
+  async function ensureViewportSize(tabId) {
+    try {
+      const res = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', { expression: 'JSON.stringify({w:innerWidth,h:innerHeight})', returnByValue: true });
+      const parsed = JSON.parse(res?.result?.value || '{}');
+      if (parsed.w > 0 && parsed.h > 0) return parsed;
+    } catch (_) {}
+    return { w: 1280, h: 800 };
+  }
+
+  async function debuggerDrag(tabId, from, to) {
+    const vp = await ensureViewportSize(tabId);
+    const sx = from.x * vp.w, sy = from.y * vp.h, tx = to.x * vp.w, ty = to.y * vp.h;
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: sx, y: sy, button: 'left', buttons: 1, clickCount: 1 });
+    const steps = 26;
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const x = sx + (tx - sx) * t;
+      const y = sy + (ty - sy) * t + Math.sin(t * Math.PI) * 2;
+      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'left', buttons: 1 });
+      await sleep(Math.max(12, 24 + Math.random() * 26));
+    }
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: tx, y: ty, button: 'left', buttons: 0, clickCount: 1 });
+    await sleep(200);
+  }
+
+  async function debuggerClick(tabId, point) {
+    const vp = await ensureViewportSize(tabId);
+    const x = point.x * vp.w, y = point.y * vp.h;
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await sleep(90);
+    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+    await sleep(240);
+  }
+
+  async function executeChallengeSolution(tabId, solution, useDomOnly = false) {
+    if (!useDomOnly) {
+      const action = solution?.action || 'none';
+      try {
+        if (action === 'drag_slider' && solution?.slider) {
+          await debuggerDrag(tabId, solution.slider.from, solution.slider.to);
+          return { ok: true, via: 'debugger' };
         }
+        if ((action === 'click_points' || action === 'click_button') && solution?.click_points?.length) {
+          for (const p of solution.click_points) await debuggerClick(tabId, p);
+          return { ok: true, via: 'debugger' };
+        }
+        if (action === 'type_text') {
+          if (solution?.click_points?.length) {
+            await debuggerClick(tabId, solution.click_points[0]);
+            await sleep(320);
+          }
+          if (solution?.text) await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text: solution.text }).catch(() => {});
+          return { ok: true, via: 'debugger' };
+        }
+      } catch (_) { /* 回退到页面内 DOM 自动化 */ }
+    }
+    const performed = await send(tabId, { type: 'SOLVE_CHALLENGE', solution }, 15000).catch(() => ({ ok: false, error: '页面执行超时' }));
+    return performed?.ok ? { ok: true, via: 'dom' } : { ok: false, error: performed?.error || '未执行任何验证操作' };
+  }
+
+  async function autoSolveChallenge(task, tabId, phase, baseMessage) {
+    const mode = task.config?.ai?.mode;
+    const service = taskAiService(task);
+    const modelInfo = selectedModelInfo(task.config?.ai?.model);
+    const aiReady = service && modelInfo?.capabilities?.vision;
+    if (!aiReady) {
+      const reason = mode === 'risk_required'
+        ? '当前模式要求 AI 自动处理验证码，但未登录 Relay 或所选模型未标记视觉能力。'
+        : '当前未启用 AI 自动处理（需要登录 Relay 并选择视觉模型）。';
+      await pauseTask(task, `${baseMessage}\n${reason}请人工完成页面验证后点击“继续当前任务”，或先完成 AI 配置。`, phase);
+      return 'paused';
+    }
+
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      setStatus(`AI 自动处理风控验证 ${attempt}/${maxAttempts}`, `模型：${task.config.ai.channelName || ''} / ${task.config.ai.modelName || task.config.ai.model}`, null);
+      let attached = false;
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        await chrome.tabs.update(tabId, { active: true });
+        await sleep(500);
+        try { await attachDebugger(tabId); attached = true; } catch (_) { attached = false; }
+        const pageInfo = await send(tabId, { type: 'GET_CHALLENGE_INFO' }, 6000).catch(() => ({ challenge: true, elements: [] }));
+        const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 62 });
+        const result = await AI.solveRiskChallenge(service, screenshot, pageInfo || {});
+        task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
+        task.aiUsage.calls++; task.aiUsage.riskCalls = (task.aiUsage.riskCalls || 0) + 1;
+        task.lastRiskChallenge = { ...result, phase, model: task.config.ai.model, at: nowIso(), attempt };
+        task.log.push({ at: nowIso(), type: 'risk-ai-solve', phase, model: task.config.ai.model, attempt, result });
+        await saveTask(task);
+
+        if (!result.solved) {
+          task.log.push({ at: nowIso(), type: 'risk-solve-no-solution', phase, attempt, summary: result.summary });
+          await sleep(1500);
+          continue;
+        }
+        await executeChallengeSolution(tabId, result, !attached);
+        await sleep(2200);
+        const check = await send(tabId, { type: 'CHECK_CHALLENGE' }, 6000).catch(() => ({ challenge: true }));
+        if (!check?.challenge) {
+          task.log.push({ at: nowIso(), type: 'risk-solve-success', phase, attempt, action: result.action, summary: result.summary });
+          setStatus('验证已通过', '风控验证已自动完成，任务继续。', null);
+          return 'solved';
+        }
+        task.log.push({ at: nowIso(), type: 'risk-solve-retry', phase, attempt, error: '执行后验证仍未解除' });
+      } catch (e) {
+        task.aiUsage = task.aiUsage || { calls: 0, keywordCalls: 0, reviewCalls: 0, riskCalls: 0, errors: [] };
+        task.aiUsage.errors.push({ at: nowIso(), stage: 'risk-challenge', error: String(e?.message || e) });
+        task.log.push({ at: nowIso(), type: 'ai-error', stage: 'risk-challenge', phase, error: String(e?.message || e) });
+      } finally {
+        if (attached) await detachDebugger(tabId).catch(() => {});
+        await sleep(900);
       }
     }
-    return pauseTask(task, message, phase);
+    await pauseTask(task, `${baseMessage}\nAI 已自动尝试 ${maxAttempts} 次仍未通过验证（若验证码位于跨域 iframe 内，插件可能无法操作其内部）。请人工完成页面验证后点击“继续当前任务”，或检查 AI 配置后重试。`, phase);
+    return 'paused';
+  }
+
+  async function sendWithSolve(task, tabId, phase, message, payload, timeout) {
+    for (let i = 0; i < 3; i++) {
+      const res = await send(tabId, payload, timeout).catch(e => ({ ok: false, error: e?.message || String(e) }));
+      if (!res?.challenge) return res;
+      const outcome = await autoSolveChallenge(task, tabId, phase, message);
+      if (outcome === 'paused') return { ok: false, paused: true, challenge: true };
+      await sleep(700);
+    }
+    return { ok: false, paused: true, challenge: true, error: '多次触发风控验证仍未解除' };
   }
 
   async function runScan(task) {
@@ -534,8 +639,8 @@
         task.cursor = { keywordIndex: ki, pageIndex: 0 };
         setStatus('正在搜索', `关键词 ${ki + 1}/${keywords.length}：${kw}`, (ki / keywords.length) * 70);
         const before = (await chrome.tabs.get(tab.id)).url;
-        const sr = await send(tab.id, { type: 'SEARCH_KEYWORD', keyword: kw });
-        if (sr?.challenge) return analyzeAndPauseChallenge(task, tab.id, 'scan', 'Temu 要求人机/安全验证。');
+        const sr = await sendWithSolve(task, tab.id, 'scan', '搜索时出现 Temu 人机/安全验证。', { type: 'SEARCH_KEYWORD', keyword: kw }, 20000);
+        if (sr?.paused) return;
         if (!sr?.ok) throw new Error(sr?.error || '搜索失败');
         await waitAfterNavigation(tab.id, before).catch(async () => { await sleep(2200); });
         await sleep(randBetween(adv.navDelayMin, adv.navDelayMax));
@@ -547,8 +652,8 @@
           if (remainingForKeyword <= 0) break;
           task.cursor = { keywordIndex: ki, pageIndex: pi };
           setStatus('扫描商品列表', `关键词：${kw}\n第 ${pi + 1}/${limits.maxPages} 页/批次，正在滚动并提取商品…`, ((ki + (pi / limits.maxPages)) / keywords.length) * 70);
-          const scan = await send(tab.id, { type: 'SCAN_RESULTS', options: { maxProducts: remainingForKeyword, maxScrolls: limits.maxScrollsPerPage } }, 45000);
-          if (scan?.challenge) return analyzeAndPauseChallenge(task, tab.id, 'scan', '扫描过程中出现 Temu 人机/安全验证。');
+          const scan = await sendWithSolve(task, tab.id, 'scan', '扫描过程中出现 Temu 人机/安全验证。', { type: 'SCAN_RESULTS', options: { maxProducts: remainingForKeyword, maxScrolls: limits.maxScrollsPerPage } }, 45000);
+          if (scan?.paused) return;
           if (!scan?.ok) throw new Error(scan?.error || '扫描商品列表失败');
 
           let added = 0;
@@ -564,8 +669,8 @@
           const reachedKeywordCap = task.candidates.filter(c => c.keyword === kw).length >= limits.maxProductsPerKeyword;
           if (reachedKeywordCap || !scan.hasNext || pi >= limits.maxPages - 1) break;
           const prev = (await chrome.tabs.get(tab.id)).url;
-          const nx = await send(tab.id, { type: 'CLICK_NEXT' });
-          if (nx?.challenge) return analyzeAndPauseChallenge(task, tab.id, 'scan', '翻页时出现 Temu 人机/安全验证。');
+          const nx = await sendWithSolve(task, tab.id, 'scan', '翻页时出现 Temu 人机/安全验证。', { type: 'CLICK_NEXT' }, 20000);
+          if (nx?.paused) return;
           if (!nx?.ok) break;
           await waitAfterNavigation(tab.id, prev).catch(async () => { await sleep(2200); });
           await sleep(randBetween(adv.navDelayMin, adv.navDelayMax));
@@ -610,12 +715,11 @@
       try {
         tab = await chrome.tabs.create({ url: cand.url, active: false });
         await waitTabReady(tab.id, 22000);
-        const detail = await send(tab.id, { type: 'GET_DETAIL' }, 12000);
-        if (detail?.challenge) {
+        const detail = await sendWithSolve(task, tab.id, 'scan', `商品详情页出现 Temu 风控图形验证：${cand.title.slice(0, 60)}`, { type: 'GET_DETAIL' }, 15000);
+        if (detail?.paused) {
           task.log.push({ at: nowIso(), type: 'detail-challenge', productId: cand.productId });
           keepTab = true;
           task.challengeTemporaryTabId = tab.id;
-          await analyzeAndPauseChallenge(task, tab.id, 'scan', `商品详情页出现 Temu 风控图形验证：${cand.title.slice(0, 60)}`);
           return false;
         }
         if (!detail?.ok) continue;
@@ -721,10 +825,8 @@
         setStatus('执行跨境ERP助手采集', `${i + 1}/${selected.length}：${item.title.slice(0, 70)}`, (i / selected.length) * 100);
         await chrome.tabs.update(tab.id, { url: item.url, active: true });
         await waitTabReady(tab.id, 25000);
-        const challenge = await send(tab.id, { type: 'CHECK_CHALLENGE' });
-        if (challenge?.challenge) {
-          return analyzeAndPauseChallenge(currentTask, tab.id, 'collect', '采集过程中出现 Temu 人机/安全验证。已完成商品不会重复执行。');
-        }
+        const challenge = await sendWithSolve(currentTask, tab.id, 'collect', '采集过程中出现 Temu 人机/安全验证。已完成商品不会重复执行。', { type: 'CHECK_CHALLENGE' }, 8000);
+        if (challenge?.paused) return;
         const res = await send(tab.id, { type: 'TRIGGER_ERP', options: { customSelector: selector, extensionId: ERP_EXTENSION_ID } }, 12000);
         if (!res?.ok) {
           item.collectedState = 'failed'; item.collectError = res?.error || '未找到跨境ERP助手采集按钮';
@@ -871,9 +973,23 @@
   els.resumeBtn.addEventListener('click', resumeTask);
   els.stopBtn.addEventListener('click', () => { stopRequested = true; toast('正在停止当前步骤…'); });
   els.showExcluded.addEventListener('change', renderTask);
+
+  function selectableCandidates() {
+    return (currentTask?.candidates || []).filter(c => c.decision !== 'excluded' && !c.collected);
+  }
   els.selectAllBtn.addEventListener('click', async () => {
     if (!currentTask) return;
-    currentTask.candidates.forEach(c => { if (c.decision !== 'excluded' && !c.collected) c.selected = true; });
+    selectableCandidates().forEach(c => { c.selected = true; });
+    await saveTask(currentTask); renderTask();
+  });
+  els.invertSelectBtn.addEventListener('click', async () => {
+    if (!currentTask) return;
+    selectableCandidates().forEach(c => { c.selected = !c.selected; });
+    await saveTask(currentTask); renderTask();
+  });
+  els.clearSelectBtn.addEventListener('click', async () => {
+    if (!currentTask) return;
+    selectableCandidates().forEach(c => { c.selected = false; });
     await saveTask(currentTask); renderTask();
   });
   els.collectBtn.addEventListener('click', collectSelected);
