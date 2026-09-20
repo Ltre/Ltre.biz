@@ -1,5 +1,9 @@
 
+# dir
 server/node_modules/
+server/.wrangler/
+
+# file
 server/.dev.vars
 
 
