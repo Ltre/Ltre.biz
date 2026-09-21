@@ -50,7 +50,7 @@
 插件请求验证码后：
 
 - `WECHAT_DELIVERY=official_account`：通过公众号客服消息向已绑定 OpenID 发送 6 位验证码。
-- `WECHAT_DELIVERY=mock`：仅用于本地开发；验证码写入本地 R2，并在 `DEV_MODE=true` 时响应 `dev_code`，便于一条链路联调。
+- `WECHAT_DELIVERY=mock`：仅用于本地开发；在 `DEV_MODE=true` 时响应顶层 `dev_code` 与 `delivery.dev_code`。R2 调试写入采用 best-effort，不会因本地 R2 不可用阻断验证码返回。插件 v1.3.0 会自动显示并填入该验证码。
 
 公众号客服消息本身可能受微信的会话时间窗口等平台规则约束；如果后续需要“服务通知/模板消息”，建议新增独立 delivery adapter，不改变认证 API。
 
@@ -59,7 +59,7 @@
 1. `cd server`
 2. `npm install`
 3. `cp .dev.vars.example .dev.vars`，填好三个必须 Secret：`ADMIN_TOKEN`、`LOGIN_CODE_SECRET`、`UPSTREAM_MASTER_KEY`
-4. 初始化 D1：`npm run db:migrate:local`
+4. 初始化 D1：`npm run db:migrate:local`（脚本已使用实际 binding `DB`）
 5. 启动：`npm run dev`
 6. 打开 Wrangler 输出的地址（通常 `http://localhost:8787`），输入 `ADMIN_TOKEN`
 7. “诊断 D1/R2/Workers AI”可从页面检查三个绑定；Workers AI 即使在本地 Wrangler 下也会访问 Cloudflare 账户并产生相应用量
@@ -78,7 +78,7 @@ npx wrangler secret put UPSTREAM_MASTER_KEY
 npx wrangler secret put WECHAT_TOKEN
 npx wrangler secret put WECHAT_APPID
 npx wrangler secret put WECHAT_SECRET
-npx wrangler d1 migrations apply AI_RELAY_DB --remote
+npm run db:migrate:remote
 npx wrangler deploy
 ```
 
@@ -87,7 +87,7 @@ npx wrangler deploy
 当前轻量后台支持：
 
 - 渠道创建（厂商直连、云平台、中转均视为“渠道”）。
-- 为渠道登记模型 ID、视觉能力、输入/输出成本。
+- 为渠道登记模型 ID、视觉能力、输入/输出成本；已登记模型支持编辑、启用/停用和删除。
 - 查看用户 AI 权限状态并启用/暂停。
 - 按用户勾选允许使用的具体渠道模型。
 - 按时间范围统计调用次数、输入/输出/总 Token、估算费用、错误数。

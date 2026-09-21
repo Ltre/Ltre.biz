@@ -70,7 +70,13 @@ async function getWechatAccessToken(env) {
 async function deliverLoginCode(env, user, code) {
   const mode = env.WECHAT_DELIVERY || 'mock';
   if (mode === 'mock') {
-    if (env.AUDIT_BUCKET) await env.AUDIT_BUCKET.put(`dev-otp/${user.phone}.json`, JSON.stringify({ phone: user.phone, code, at: nowIso() }), { httpMetadata: { contentType: 'application/json' } });
+    if (env.AUDIT_BUCKET) {
+      try {
+        await env.AUDIT_BUCKET.put(`dev-otp/${user.phone}.json`, JSON.stringify({ phone: user.phone, code, at: nowIso() }), { httpMetadata: { contentType: 'application/json' } });
+      } catch (_) {
+        // DEV mock 登录不能因为本地 R2 模拟器不可用而阻断验证码返回。
+      }
+    }
     return { mode, delivered: true, dev_code: asBool(env.DEV_MODE) ? code : undefined };
   }
   if (!user.wechat_openid) throw err('该手机号尚未绑定公众号 OpenID，请先关注公众号并发送 reg:手机号 完成注册', 409, 'wechat_not_bound');
@@ -114,7 +120,8 @@ async function requestCode(request, env) {
   const created = nowIso(), expires = plusMinutes(Number(env.OTP_TTL_MINUTES || 5));
   await env.DB.prepare('INSERT INTO login_codes(user_id,code_hash,expires_at,created_at) VALUES(?,?,?,?)').bind(user.id,hash,expires,created).run();
   const delivery = await deliverLoginCode(env, user, code);
-  return json({ ok: true, expires_at: expires, delivery });
+  const devCode = asBool(env.DEV_MODE) && delivery?.mode === 'mock' ? code : undefined;
+  return json({ ok: true, expires_at: expires, delivery, ...(devCode ? { dev_code: devCode } : {}) });
 }
 async function verifyCode(request, env) {
   const body = await readJson(request); const phone = String(body.phone || '').trim(); const code = String(body.code || '').trim();
@@ -141,7 +148,7 @@ async function logout(request, env) {
 
 async function listModels(request, env) {
   const user = await authUser(request, env);
-  const rows = await env.DB.prepare(`SELECT m.*,c.name channel_name,c.slug channel_slug,c.protocol FROM user_model_permissions p JOIN models m ON m.id=p.model_id JOIN channels c ON c.id=m.channel_id WHERE p.user_id=? AND p.allowed=1 AND m.enabled=1 AND c.enabled=1 ORDER BY c.name,m.display_name,m.model_id`).bind(user.id).all();
+  const rows = await env.DB.prepare(`SELECT m.*,c.name channel_name,c.slug channel_slug,c.protocol FROM user_model_permissions p JOIN models m ON m.id=p.model_id JOIN channels c ON c.id=m.channel_id WHERE p.user_id=? AND p.allowed=1 AND m.enabled=1 AND m.deleted_at IS NULL AND c.enabled=1 ORDER BY c.name,m.display_name,m.model_id`).bind(user.id).all();
   const groups = new Map();
   for (const r of rows.results || []) {
     const key = r.channel_slug; if (!groups.has(key)) groups.set(key,{ id:key,name:r.channel_name,protocol:r.protocol,models:[] });
@@ -153,7 +160,7 @@ async function listModels(request, env) {
 async function resolveAllowedModel(env, userId, publicId) {
   const slash = String(publicId || '').indexOf('/'); if (slash <= 0) throw err('model 必须使用 channel/model-id 格式',400,'bad_model');
   const channelSlug = publicId.slice(0,slash), modelId = publicId.slice(slash+1);
-  const row = await env.DB.prepare(`SELECT m.*,c.name channel_name,c.slug channel_slug,c.protocol,c.base_url,c.api_path,c.credentials_enc,c.enabled channel_enabled,p.allowed FROM models m JOIN channels c ON c.id=m.channel_id JOIN user_model_permissions p ON p.model_id=m.id AND p.user_id=? WHERE c.slug=? AND m.model_id=? LIMIT 1`).bind(userId,channelSlug,modelId).first();
+  const row = await env.DB.prepare(`SELECT m.*,c.name channel_name,c.slug channel_slug,c.protocol,c.base_url,c.api_path,c.credentials_enc,c.enabled channel_enabled,p.allowed FROM models m JOIN channels c ON c.id=m.channel_id JOIN user_model_permissions p ON p.model_id=m.id AND p.user_id=? WHERE c.slug=? AND m.model_id=? AND m.deleted_at IS NULL LIMIT 1`).bind(userId,channelSlug,modelId).first();
   if (!row || !row.allowed || !row.enabled || !row.channel_enabled) throw err('当前用户无权使用该渠道/模型',403,'model_forbidden');
   row.public_id = publicId;
   return { model: row, channel: { id:row.channel_id,name:row.channel_name,slug:row.channel_slug,protocol:row.protocol,base_url:row.base_url,api_path:row.api_path,credentials_enc:row.credentials_enc } };
@@ -199,7 +206,7 @@ async function adminChannels(request, env) {
   requireAdmin(request,env);
   if(request.method==='GET'){
     const ch=await env.DB.prepare(`SELECT c.*,CASE WHEN c.credentials_enc IS NULL OR c.credentials_enc='' THEN 0 ELSE 1 END has_credentials FROM channels c ORDER BY c.id`).all();
-    const models=await env.DB.prepare('SELECT * FROM models ORDER BY channel_id,id').all();
+    const models=await env.DB.prepare('SELECT * FROM models WHERE deleted_at IS NULL ORDER BY channel_id,id').all();
     return json({ok:true,channels:(ch.results||[]).map(c=>({...c,credentials_enc:undefined,models:(models.results||[]).filter(m=>m.channel_id===c.id).map(m=>({...m,capabilities:JSON.parse(m.capabilities_json||'{}')}))}))});
   }
   const b=await readJson(request); if(!b.name||!b.slug||!b.protocol) throw err('name/slug/protocol 必填');
@@ -215,7 +222,40 @@ async function adminPatchChannel(request, env, channelId) {
 }
 async function adminAddModel(request, env, channelId) {
   requireAdmin(request,env); const b=await readJson(request); if(!b.model_id) throw err('model_id 必填'); const t=nowIso();
-  const cap=JSON.stringify(b.capabilities||{}); const r=await env.DB.prepare(`INSERT INTO models(channel_id,model_id,display_name,enabled,capabilities_json,input_cost_per_million,output_cost_per_million,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`).bind(Number(channelId),b.model_id,b.display_name||b.model_id,b.enabled===false?0:1,cap,b.input_cost_per_million??null,b.output_cost_per_million??null,t,t).run(); return json({ok:true,id:r.meta?.last_row_id},201);
+  const cap=JSON.stringify(b.capabilities||{});
+  const r=await env.DB.prepare(`INSERT INTO models(channel_id,model_id,display_name,enabled,capabilities_json,input_cost_per_million,output_cost_per_million,created_at,updated_at,deleted_at) VALUES(?,?,?,?,?,?,?,?,?,NULL)
+    ON CONFLICT(channel_id,model_id) DO UPDATE SET display_name=excluded.display_name,enabled=excluded.enabled,capabilities_json=excluded.capabilities_json,input_cost_per_million=excluded.input_cost_per_million,output_cost_per_million=excluded.output_cost_per_million,updated_at=excluded.updated_at,deleted_at=NULL`).bind(Number(channelId),b.model_id,b.display_name||b.model_id,b.enabled===false?0:1,cap,b.input_cost_per_million??null,b.output_cost_per_million??null,t,t).run();
+  const row=await env.DB.prepare('SELECT id FROM models WHERE channel_id=? AND model_id=? AND deleted_at IS NULL').bind(Number(channelId),b.model_id).first();
+  return json({ok:true,id:row?.id||r.meta?.last_row_id},201);
+}
+async function adminPatchModel(request, env, modelId) {
+  requireAdmin(request,env);
+  const b=await readJson(request), sets=[], vals=[];
+  if ('model_id' in b) {
+    const v=String(b.model_id||'').trim(); if(!v) throw err('model_id 不能为空');
+    sets.push('model_id=?'); vals.push(v);
+  }
+  if ('display_name' in b) { sets.push('display_name=?'); vals.push(String(b.display_name||'').trim() || null); }
+  if ('enabled' in b) { sets.push('enabled=?'); vals.push(asBool(b.enabled)?1:0); }
+  if ('capabilities' in b) { sets.push('capabilities_json=?'); vals.push(JSON.stringify(b.capabilities||{})); }
+  if ('input_cost_per_million' in b) { sets.push('input_cost_per_million=?'); vals.push(b.input_cost_per_million==null||b.input_cost_per_million===''?null:Number(b.input_cost_per_million)); }
+  if ('output_cost_per_million' in b) { sets.push('output_cost_per_million=?'); vals.push(b.output_cost_per_million==null||b.output_cost_per_million===''?null:Number(b.output_cost_per_million)); }
+  if(!sets.length) throw err('没有可更新字段');
+  sets.push('updated_at=?'); vals.push(nowIso(),Number(modelId));
+  const r=await env.DB.prepare(`UPDATE models SET ${sets.join(',')} WHERE id=? AND deleted_at IS NULL`).bind(...vals).run();
+  if(!Number(r.meta?.changes||0)) throw err('模型不存在',404,'model_not_found');
+  return json({ok:true});
+}
+async function adminDeleteModel(request, env, modelId) {
+  requireAdmin(request,env);
+  const id=Number(modelId), t=nowIso();
+  const existing=await env.DB.prepare('SELECT id FROM models WHERE id=? AND deleted_at IS NULL').bind(id).first();
+  if(!existing) throw err('模型不存在',404,'model_not_found');
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM user_model_permissions WHERE model_id=?').bind(id),
+    env.DB.prepare('UPDATE models SET enabled=0,deleted_at=?,updated_at=? WHERE id=?').bind(t,t,id)
+  ]);
+  return json({ok:true});
 }
 async function adminUsage(request, env, url) {
   requireAdmin(request,env); const from=url.searchParams.get('from')||'1970-01-01T00:00:00.000Z', to=url.searchParams.get('to')||'2999-12-31T23:59:59.999Z', userId=url.searchParams.get('user_id');
@@ -251,6 +291,8 @@ async function route(request, env) {
   if(p==='/api/admin/channels'&&(request.method==='GET'||request.method==='POST')) return adminChannels(request,env);
   m=p.match(/^\/api\/admin\/channels\/(\d+)$/); if(m&&request.method==='PATCH') return adminPatchChannel(request,env,m[1]);
   m=p.match(/^\/api\/admin\/channels\/(\d+)\/models$/); if(m&&request.method==='POST') return adminAddModel(request,env,m[1]);
+  m=p.match(/^\/api\/admin\/models\/(\d+)$/); if(m&&request.method==='PATCH') return adminPatchModel(request,env,m[1]);
+  m=p.match(/^\/api\/admin\/models\/(\d+)$/); if(m&&request.method==='DELETE') return adminDeleteModel(request,env,m[1]);
   if(p==='/api/admin/usage'&&request.method==='GET') return adminUsage(request,env,url);
   if(p==='/api/admin/diagnostics'&&request.method==='POST') return adminDiagnostics(request,env);
   if(p==='/api/dev/register'&&request.method==='POST') return devRegister(request,env);

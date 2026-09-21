@@ -23,7 +23,7 @@
 
 可以。你这版 `server/` 实际上已经是一个可以独立运行的 **Cloudflare Worker + D1 + R2 + AI Relay 管理后台**。你完全不会 Wrangler 没关系，先按“本地 mock → Cloudflare 正式环境 → 最后接微信”的顺序做最容易。
 
-先提醒一个我刚检查代码发现的小问题：`wrangler.jsonc` 里 D1 binding 实际叫 **`DB`**，但 `package.json` 的两个 migration 命令写成了 `AI_RELAY_DB`。所以暂时不要直接执行 `npm run db:migrate:local`，下面我给你的命令会直接用正确的 `DB`。
+这一版已经修正 D1 migration 脚本：`wrangler.jsonc` 的 binding 与 `package.json` 都统一使用 **`DB`**，因此可以直接执行 `npm run db:migrate:local` / `npm run db:migrate:remote`。
 
 ## 一、这个 server 到底需要配置哪些东西？
 
@@ -70,7 +70,7 @@ Cloudflare Worker
 比如：
 
 ```powershell
-cd D:\xxx\temu-product-auto-selector-260919-v1.2.0\server
+cd D:\xxx\temu-product-auto-selector-260919-v1.3.0\server
 ```
 
 确认这里能看到：
@@ -1045,8 +1045,8 @@ api.weixin.qq.com/message/custom/send
 现在：
 
 ```json
-"db:migrate:local": "wrangler d1 migrations apply AI_RELAY_DB --local",
-"db:migrate:remote": "wrangler d1 migrations apply AI_RELAY_DB --remote"
+"db:migrate:local": "wrangler d1 migrations apply DB --local",
+"db:migrate:remote": "wrangler d1 migrations apply DB --remote"
 ```
 
 应该改成：

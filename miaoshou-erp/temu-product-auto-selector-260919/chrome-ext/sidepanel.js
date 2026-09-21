@@ -20,7 +20,7 @@
     statusCard: $('statusCard'), statusTitle: $('statusTitle'), taskId: $('taskId'), progressBar: $('progressBar'), statusText: $('statusText'),
     resumeBtn: $('resumeBtn'), stopBtn: $('stopBtn'),
     resultsCard: $('resultsCard'), resultCounts: $('resultCounts'), resultList: $('resultList'), showExcluded: $('showExcluded'),
-    selectAllBtn: $('selectAllBtn'), collectBtn: $('collectBtn'), exportBtn: $('exportBtn'),
+    selectAllBtn: $('selectAllBtn'), invertSelectionBtn: $('invertSelectionBtn'), clearSelectionBtn: $('clearSelectionBtn'), collectBtn: $('collectBtn'), exportBtn: $('exportBtn'),
     taskHistory: $('taskHistory'), loadTaskBtn: $('loadTaskBtn'), deleteTaskBtn: $('deleteTaskBtn'),
     erpSelector: $('erpSelector'), collectDelay: $('collectDelay'), navDelayMin: $('navDelayMin'), navDelayMax: $('navDelayMax'), detailDelayMin: $('detailDelayMin'), detailDelayMax: $('detailDelayMax'),
     aiMode: $('aiMode'), aiBadge: $('aiBadge'), aiServerUrl: $('aiServerUrl'), aiPhone: $('aiPhone'), aiLoginCode: $('aiLoginCode'), aiSendCodeBtn: $('aiSendCodeBtn'), aiLoginBtn: $('aiLoginBtn'), aiLogoutBtn: $('aiLogoutBtn'), aiRefreshModelsBtn: $('aiRefreshModelsBtn'), aiLoginState: $('aiLoginState'), aiModelSelect: $('aiModelSelect'), aiTestBtn: $('aiTestBtn'), aiTestResult: $('aiTestResult'),
@@ -31,6 +31,7 @@
   let running = false;
   let stopRequested = false;
   let workingTabId = null;
+  let challengeMonitorToken = 0;
   let aiGateway = { baseUrl: '', phone: '', token: '', user: null, channels: [], selectedModel: '' };
 
   const storageGet = keys => chrome.storage.local.get(keys);
@@ -201,10 +202,22 @@
     try {
       const data = await AI.requestCode(baseUrl, phone);
       aiGateway.baseUrl = baseUrl; aiGateway.phone = phone;
-      if (data?.delivery?.dev_code) els.aiLoginState.textContent = `本地 DEV 验证码：${data.delivery.dev_code}`;
-      else els.aiLoginState.textContent = '验证码已通过微信发送';
+      const devCode = String(data?.dev_code || data?.delivery?.dev_code || '').trim();
+      if (/^\d{6}$/.test(devCode)) {
+        els.aiLoginCode.value = devCode;
+        els.aiLoginState.textContent = `本地 DEV 验证码：${devCode}（已自动填入）`;
+        toast(`本地验证码 ${devCode}，已自动填入`, 5000);
+      } else {
+        const mode = data?.delivery?.mode || '';
+        els.aiLoginState.textContent = mode === 'mock'
+          ? '服务端处于 mock 模式，但未返回 DEV 验证码；请确认 DEV_MODE=true 后重启 Wrangler'
+          : '验证码已通过微信发送';
+      }
       await saveConfig(false);
-    } catch (e) { els.aiLoginState.textContent = `发送失败：${e.message}`; }
+    } catch (e) {
+      els.aiLoginState.textContent = `发送失败：${e.message}`;
+      toast(`验证码发送失败：${e.message}`, 5000);
+    }
   }
 
   async function loginGateway() {
@@ -493,7 +506,31 @@
         }
       }
     }
-    return pauseTask(task, message, phase);
+    task.challengeTabId = tabId;
+    await pauseTask(task, `${message}\n完成页面验证后插件会自动检测并继续；也可以手动点击“继续当前任务”。`, phase);
+    monitorChallengeClear(task, tabId);
+  }
+
+  async function monitorChallengeClear(task, tabId) {
+    const token = ++challengeMonitorToken;
+    const taskId = task.id;
+    for (let i = 0; i < 240; i++) {
+      await sleep(2500);
+      if (token !== challengeMonitorToken || !currentTask || currentTask.id !== taskId || currentTask.status !== 'paused') return;
+      if (currentTask.pausePhase === 'adapter') return;
+      try {
+        const state = await send(tabId, { type: 'CHECK_CHALLENGE' }, 5000);
+        if (state?.ok && !state.challenge) {
+          currentTask.log.push({ at: nowIso(), type: 'challenge-cleared', phase: currentTask.pausePhase || 'scan', autoResume: true });
+          if (currentTask.lastRiskChallenge) currentTask.lastRiskChallenge.clearedAt = nowIso();
+          await saveTask(currentTask);
+          toast('检测到验证已完成，自动继续任务', 3500);
+          return resumeTask();
+        }
+      } catch (_) {
+        // 页面仍在导航或 content script 尚未恢复时继续等待。
+      }
+    }
   }
 
   async function runScan(task) {
@@ -684,6 +721,7 @@
 
   async function resumeTask() {
     if (!currentTask || currentTask.status !== 'paused') return;
+    challengeMonitorToken++;
     const phase = currentTask.pausePhase || 'scan';
     if (currentTask.challengeTemporaryTabId) {
       await chrome.tabs.remove(currentTask.challengeTemporaryTabId).catch(() => {});
@@ -789,7 +827,8 @@
     const review = cands.filter(c => c.decision === 'review').length;
     const excluded = cands.filter(c => c.decision === 'excluded').length;
     const collected = cands.filter(c => c.collected).length;
-    els.resultCounts.textContent = `通过 ${pass} · 待确认 ${review} · 排除 ${excluded} · 已触发采集 ${collected} · AI ${currentTask.aiUsage?.calls || 0} 次`;
+    const selected = cands.filter(c => c.selected && c.decision !== 'excluded' && !c.collected).length;
+    els.resultCounts.textContent = `通过 ${pass} · 待确认 ${review} · 排除 ${excluded} · 已选 ${selected} · 已触发采集 ${collected} · AI ${currentTask.aiUsage?.calls || 0} 次`;
 
     els.resultList.innerHTML = '';
     const showExcluded = els.showExcluded.checked;
@@ -871,11 +910,20 @@
   els.resumeBtn.addEventListener('click', resumeTask);
   els.stopBtn.addEventListener('click', () => { stopRequested = true; toast('正在停止当前步骤…'); });
   els.showExcluded.addEventListener('change', renderTask);
-  els.selectAllBtn.addEventListener('click', async () => {
+  async function updateCandidateSelection(mode) {
     if (!currentTask) return;
-    currentTask.candidates.forEach(c => { if (c.decision !== 'excluded' && !c.collected) c.selected = true; });
-    await saveTask(currentTask); renderTask();
-  });
+    for (const c of currentTask.candidates || []) {
+      if (c.decision === 'excluded' || c.collected) continue;
+      if (mode === 'all') c.selected = true;
+      else if (mode === 'none') c.selected = false;
+      else if (mode === 'invert') c.selected = !c.selected;
+    }
+    await saveTask(currentTask);
+    renderTask();
+  }
+  els.selectAllBtn.addEventListener('click', () => updateCandidateSelection('all'));
+  els.invertSelectionBtn.addEventListener('click', () => updateCandidateSelection('invert'));
+  els.clearSelectionBtn.addEventListener('click', () => updateCandidateSelection('none'));
   els.collectBtn.addEventListener('click', collectSelected);
   els.exportBtn.addEventListener('click', exportTask);
   els.loadTaskBtn.addEventListener('click', () => loadTaskById(els.taskHistory.value));
