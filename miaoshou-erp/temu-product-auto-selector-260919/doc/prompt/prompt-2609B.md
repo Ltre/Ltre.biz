@@ -117,7 +117,8 @@
 	3、既然你提到【先提醒一个我刚检查代码发现的小问题：wrangler.jsonc 里 D1 binding 实际叫 DB，但 package.json 的两个 migration 命令写成了 AI_RELAY_DB。所以暂时不要直接执行 npm run db:migrate:local，下面我给你的命令会直接用正确的 DB】，还提到要改用【npx wrangler d1 migrations apply DB --local】命令来初始化本地D1，那你就在这一版修正这个问题。
 	
 	4、后台的`渠道`处，应该要支持已经填入模型的编辑/删除功能，还要支持启用/停用切换（这个决定是否给用户使用）。
-
+	
+	5、你提到在本地开发环境点击插件的`发送验证码`后，Server 不会真的发微信，插件会显示类似`本地 DEV 验证码：384721`的内容，但是我点击后并没有你提到的预期。
 
 
 
