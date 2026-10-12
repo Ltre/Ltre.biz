@@ -1,0 +1,26 @@
+
+问：
+
+     开发一个插件，常驻随时提取任意网页DOM、各种JS变量状态、各种storage、数据库等等一切能从浏览器提取到的数据。这个插件的目的是为了方便给客户开发便捷工具用的，避免多次占用客户的座位反复操作，通过这款插件，就可以精准获取浏览器各种状态和数据，通过私有网络渠道回传到开发工具中，由开发工具的AI根据具体情况和客户的具体需求，生成可执行的代码或打包成可复用的程序/插件。
+     安装在客户电脑的插件可以设定当前浏览器场景归属于哪个开发项目编号，这样就有助于开发者同时帮助多个客户维护。为此，后台开发工具应该要有开发项目的概念，或者叫工单。
+     客户端打开插件时应该第一时间设定开发项目编号（或者叫工单号），并且打开`对接维护`按钮，这样就可以后台建立连接。
+
+    客户机器的插件首次运行时会要求填写手机号作为身份识别（不验证真实性，很少人用）
+
+    工单由后台分配到客户的插件中，之后客户端可以在插件中指定工单。
+     后台开发工具打开某个具体的工单，进行采集、执行指令、下发程序（推给客户下载并提示如何安装新的程序）等操作。
+
+    先不进行开发，而是评估需求可行性和怎么做
+
+    之前也有讨论记录，可以综合讨论一下：
+
+    [https://raw.githubusercontent.com/Ltre/Ltre.biz/refs/heads/main/universal-browser-LLM-connnector/overview.md](https://raw.githubusercontent.com/Ltre/Ltre.biz/refs/heads/main/universal-browser-LLM-connnector/overview.md)
+    [https://raw.githubusercontent.com/Ltre/Ltre.biz/refs/heads/main/universal-browser-LLM-connnector/overview-summary-via-gpt.md](https://raw.githubusercontent.com/Ltre/Ltre.biz/refs/heads/main/universal-browser-LLM-connnector/overview-summary-via-gpt.md)
+
+
+
+答：
+
+
+
+    详见：universal-browser-LLM-connnector/requestment-261012.md
