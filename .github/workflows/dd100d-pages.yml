@@ -24,6 +24,10 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: dd100d/preview
+      - name: Verify temporary HTML preview mirror
+        run: |
+          curl -sSI -L --max-time 20 --fail "https://raw.githack.com/Ltre/Ltre.biz/dd100d/dd100d/preview/index.html" | head -n 15
+        continue-on-error: true
   deploy:
     runs-on: ubuntu-latest
     needs: build
