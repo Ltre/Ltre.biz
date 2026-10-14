@@ -1,0 +1,49 @@
+name: dd100d-2 MarginPilot CI
+on:
+  push:
+    branches: [dd100d-2]
+    paths:
+      - 'dd100d-2/**'
+      - '.github/workflows/dd100d-2-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dd100d-2
+    steps:
+      - name: Checkout dd100d-2
+        uses: actions/checkout@v4
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax validation
+        run: npm run check
+      - name: Unit and CSV tests
+        run: npm test
+      - name: Build Chrome Extension
+        run: npm run extension
+      - name: Validate extension bundle
+        run: |
+          test -s dist/extension/manifest.json
+          test -s dist/extension/app/index.html
+          test -s dist/extension/app/core.mjs
+      - name: Downloadable Chrome extension preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: marginpilot-chrome-extension
+          path: dd100d-2/dist/extension/
+          retention-days: 14
+      - name: Downloadable local web preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: marginpilot-local-web
+          path: dd100d-2/app/
+          retention-days: 14
+      - name: Validate PWA documents
+        run: |
+          node -e "const f=require('fs'); JSON.parse(f.readFileSync('app/manifest.webmanifest','utf8')); JSON.parse(f.readFileSync('extension/manifest.json','utf8'))"
