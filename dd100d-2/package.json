@@ -1,0 +1,15 @@
+{
+  "name": "marginpilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Privacy-first SKU profit stress tester",
+  "scripts": {
+    "test": "node --test",
+    "extension": "node scripts/build-extension.mjs",
+    "check": "node --check app/main.mjs && node --check app/core.mjs && node --check app/sw.js && node --check extension/popup.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
