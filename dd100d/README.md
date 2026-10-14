@@ -4,6 +4,14 @@ An automated, globally accessible **website audit micro-product** deployed as a 
 
 **Business hypothesis, not a revenue guarantee:** 2 sales/day × $59 = $118/day gross before fees, refunds, taxes, operating costs. Current paid conversion rate and customer demand are unknown. Do not advertise this as verified income.
 
+## GitHub Pages preview (no credentials needed)
+
+Static demo files are at `dd100d/preview/` on the `dd100d` branch. The workflow `.github/workflows/dd100d-pages.yml` uploads and deploys **only this directory** to GitHub Pages, leaving `main` untouched. The page includes a labeled fictional sample report and a real, **fully client-side HTML markup analyzer**; URL scanning is opportunistic and subject to cross-origin restrictions. Payments are visibly disabled.
+
+**One-time GitHub Pages initialization:** go to `https://github.com/Ltre/Ltre.biz/settings/pages` → Build and deployment → Source → **GitHub Actions**. GitHub's `GITHUB_TOKEN` cannot enable Pages for a repository that has never used it; this repository currently returns `Get Pages site failed: Not Found`. After selecting GitHub Actions, run `Deploy dd100d preview to GitHub Pages` via Actions → Run workflow on branch `dd100d` (or push another change). The expected site address after a successful deploy, barring a custom domain, is `https://ltre.github.io/Ltre.biz/`.
+
+You can also open `dd100d/preview/index.html` as a local static file to preview the UI. Its CSS and JS use relative paths and no build step.
+
 ## Local checks
 ```sh
 cd dd100d
