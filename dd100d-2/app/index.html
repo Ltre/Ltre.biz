@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0c1220">
+  <meta name="description" content="MarginPilot — stress-test every SKU against fees, returns, ad costs and FX. Built for borderless sellers.">
+  <title>MarginPilot — SKU Profit Stress Tester</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./main.mjs"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="logo" href="./"><span class="logo-mark">M<span>↗</span></span> Margin<span>Pilot</span><small>LAB</small></a>
+      <div class="side-label">WORKSPACE</div>
+      <a class="nav-item active" href="#dashboard"><span>▦</span> Profit overview</a>
+      <a class="nav-item" href="#products"><span>▤</span> SKU portfolio</a>
+      <a class="nav-item" href="#methodology"><span>◉</span> Model & assumptions</a>
+      <div class="sidebar-bottom"><span class="status-orb"></span><strong>Private by default</strong><p>Your numbers stay on your device. No analytics or account required.</p><span class="pill">V0.1 · EARLY PRODUCT</span></div>
+    </aside>
+    <div class="main-wrap">
+      <header class="topbar">
+        <div class="breadcrumbs">MarginPilot <span>/</span> <b>Profit workspace</b></div>
+        <div class="top-right"><span class="offline-chip">◉ CLIENT-SIDE</span><span class="avatar">MP</span></div>
+      </header>
+      <main class="main" id="dashboard">
+        <section class="heading">
+          <div><div class="eyebrow">SELL SMARTER · FROM ANYWHERE</div><h1>Know your real margin<span>.</span></h1><p>Your profit is more than selling price minus product cost. Model fees, ads, refunds and FX — before they become expensive surprises.</p></div>
+          <div class="heading-actions"><button class="btn secondary" id="importButton">↑ Import CSV</button><button class="btn primary" id="addButton">+ Add SKU</button><input id="csvInput" type="file" hidden accept=".csv,text/csv"></div>
+        </section>
+        <div class="demo-banner" id="demoBanner"><div><span class="banner-icon">✦</span><strong>You're viewing sample inventory.</strong> Fictional SKU data, not connected to a store or marketplace.</div><button id="resetSample">Reset sample ↗</button></div>
+        <section class="controls" aria-label="Scenario and assumptions">
+          <div class="scenario"><span>ANALYSIS MODE</span><div class="switcher"><button class="selected" id="baseMode" aria-pressed="true">Baseline</button><button id="stressMode" aria-pressed="false">⚡ Stress test</button></div></div>
+          <div class="control-right"><label>Reporting currency <select id="currency"><option>USD</option><option>EUR</option><option>SGD</option><option>JPY</option><option>THB</option><option>CNY</option></select></label><button class="link-button" id="settingsButton">⚙ Assumptions</button></div>
+        </section>
+        <section class="summary-grid" id="metricCards" aria-label="Portfolio metrics"></section>
+        <section class="workspace-grid" id="products">
+          <div class="portfolio-panel">
+            <div class="panel-head"><div><div class="eyebrow">YOUR INVENTORY</div><h2>SKU profitability</h2><p>Compare product economics, sort the biggest leaks, then export your decisions.</p></div><button class="btn subtle" id="exportButton">↓ Export CSV</button></div>
+            <div class="table-controls"><div class="filters" role="group" aria-label="SKU status filter"><button data-filter="all" class="chosen">All <span id="allCount"></span></button><button data-filter="loss">Losing</button><button data-filter="watch">Watchlist</button><button data-filter="healthy">Healthy</button></div><input type="search" id="search" placeholder="⌕ Search SKU…"></div>
+            <div class="table-wrap"><table><thead><tr><th>PRODUCT / SKU</th><th>PRICE</th><th>UNIT PROFIT</th><th>MARGIN</th><th>MONTHLY IMPACT</th><th>STATUS</th><th></th></tr></thead><tbody id="skuRows"></tbody></table><div id="emptyState" class="empty" hidden>No matching products. Import CSV or add a SKU.</div></div>
+            <div class="table-foot"><span id="rowInfo">0 products</span><span>Click a product to edit assumptions.</span></div>
+          </div>
+          <aside class="insights-panel">
+            <div class="insight-card"><span class="eyebrow">WHAT MATTERS MOST</span><h3>Priority signals <span>✦</span></h3><div id="priorityList"></div></div>
+            <div class="insight-card experiment"><span class="eyebrow">QUICK EXPERIMENT</span><h3>What if things change?</h3><p>Stress mode increases acquisition cost, expected returns and FX friction. Every assumption is adjustable.</p><button id="tryStress" class="btn wide">Run stress scenario →</button></div>
+            <div class="insight-card planned"><span>FUTURE PRO CAPABILITY</span><h3>Know before margin breaks.</h3><p>Planned: automated CSV ingestion, threshold alerts and multi-store monitoring.</p><div class="future-price">$39<small> /month · hypothesis</small></div><p class="tiny">No checkout, trial or subscription is active.</p></div>
+          </aside>
+        </section>
+        <section class="method" id="methodology"><div><div class="eyebrow">TRANSPARENT FORMULAS</div><h2>Model the economics. Not the hype.</h2><p>All fees are entered manually and apply to a single reporting currency. We do not invent platform rates, infer sales, read account data, or claim these results represent accounting profit. Returns are modeled as an expected additional loss per return, which you define.</p><div class="formulas"><code>Expected return cost = return rate × loss per return</code><code>Unit profit = price − all fixed costs − price-based fees − expected return cost</code><code>Break-even price = fixed costs ÷ (1 − total percentage fees)</code></div></div><div class="method-side"><strong>Built for</strong><p>Cross-border merchants, marketplace sellers, agencies and indie operators.</p><hr><strong>Your data</strong><p>Stored in this browser only. No cookies for tracking, no remote data transfer.</p><button id="clearData" class="danger-link">Erase local workspace</button></div></section>
+      </main>
+      <footer><span>© MarginPilot concept · Independent prototype</span><span>100% client-side · No live fee feeds · No income guarantees</span><a href="https://github.com/Ltre/Ltre.biz/tree/dd100d-2/dd100d-2" target="_blank" rel="noopener noreferrer">Source ↗</a></footer>
+    </div>
+  </div>
+  <dialog id="editDialog"><form method="dialog" id="editForm"><div class="dialog-top"><div><div class="eyebrow">PRODUCT ASSUMPTIONS</div><h2 id="dialogTitle">Edit SKU</h2></div><button type="button" id="closeDialog" aria-label="Close dialog" class="icon-button">✕</button></div><p class="muted">Costs and revenues are in the chosen reporting currency. Values are per sale, except units/month.</p><div class="form-grid"><label>SKU / ID<input name="sku" required maxlength="80"></label><label>Product name<input name="name" required maxlength="160"></label><label>Selling price<input name="price" type="number" min="0.01" max="1000000000" step="0.01" required></label><label>Product cost (COGS)<input name="cogs" type="number" min="0" step="0.01" required></label><label>Seller-paid shipping<input name="shipping" type="number" min="0" step="0.01" required></label><label>Fulfillment / packaging<input name="fulfillment" type="number" min="0" step="0.01" required></label><label>Ad cost per acquired sale<input name="adCpa" type="number" min="0" step="0.01" required></label><label>Return rate (%)<input name="returnRate" type="number" min="0" max="100" step="0.1" required></label><label>Extra loss per return<input name="returnLoss" type="number" min="0" step="0.01" required></label><label>Sales / month<input name="units" type="number" min="0" step="1" required></label></div><p id="editError" class="error" role="alert"></p><div class="dialog-actions"><button type="button" id="deleteSku" class="danger-link">Delete SKU</button><div><button type="button" class="btn secondary" id="cancelDialog">Cancel</button><button type="submit" class="btn primary">Save product</button></div></div></form></dialog>
+  <dialog id="settingsDialog"><form method="dialog" id="settingsForm"><div class="dialog-top"><div><div class="eyebrow">SCENARIO SETTINGS</div><h2>Assumptions</h2></div><button type="button" class="icon-button" id="closeSettings">✕</button></div><p class="muted">These are example defaults, not current fees from any marketplace. Replace with your own rates.</p><div class="form-grid"><label>Marketplace fee (%)<input name="marketFee" type="number" min="0" max="100" step="0.01" required></label><label>Payment fee (%)<input name="paymentFee" type="number" min="0" max="100" step="0.01" required></label><label>Fixed payment fee<input name="paymentFixed" type="number" min="0" step="0.01" required></label><label>FX friction (%)<input name="fxLoss" type="number" min="0" max="100" step="0.01" required></label><label>Target margin (%)<input name="targetMargin" type="number" min="0" max="100" step="0.1" required></label><span></span><label>Stress: extra ad CPA (%)<input name="stressAdPercent" type="number" min="0" max="500" step="1" required></label><label>Stress: return rate (+points)<input name="stressReturnPoints" type="number" min="0" max="100" step="0.1" required></label><label>Stress: FX (+points)<input name="stressFxPoints" type="number" min="0" max="100" step="0.1" required></label></div><p id="settingsError" class="error" role="alert"></p><div class="dialog-actions"><span></span><div><button type="button" class="btn secondary" id="cancelSettings">Cancel</button><button type="submit" class="btn primary">Apply settings</button></div></div></form></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
