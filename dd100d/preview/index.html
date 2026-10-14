@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080b19">
+  <meta name="description" content="SiteSignal gives creators and agencies an instant technical website health snapshot.">
+  <title>SiteSignal — A clearer picture of your website</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="announcement"><span class="ping"></span> PRODUCT PREVIEW <span class="announcement-note">· Built for borderless businesses · No account required</span></div>
+  <header class="site-header">
+    <a class="brand" href="#home" aria-label="SiteSignal home"><span class="brand-mark">S<span></span></span><span>site<span class="brand-accent">signal</span><small>.app</small></span></a>
+    <nav aria-label="Main navigation"><a href="#features">Features</a><a href="#workspace">Live demo</a><a href="#pricing">Pricing</a></nav>
+    <a href="#workspace" class="header-cta">Explore demo <span aria-hidden="true">↗</span></a>
+    <button class="mobile-toggle" id="mobileToggle" aria-label="Toggle menu" aria-expanded="false">☰</button>
+  </header>
+  <main id="home">
+    <section class="hero page-wrap">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="eyebrow-dot">✦</span> THE WEBSITE INTELLIGENCE TOOL</div>
+        <h1>Know your website.<br><span>Grow with</span> clarity<span class="accent-dot">.</span></h1>
+        <p>Catch overlooked page problems, make smarter improvements, and show clients exactly what needs attention — in a clean, actionable report.</p>
+        <div class="hero-actions"><a href="#workspace" class="btn primary">Try the interactive demo <span>↗</span></a><a href="#features" class="btn secondary">See what we check <span>↓</span></a></div>
+        <div class="hero-caption"><span class="mini-check">✓</span> No signup <span class="separator">•</span><span class="mini-check">✓</span> Runs in your browser <span class="separator">•</span><span class="mini-check">✓</span> Free preview</div>
+      </div>
+      <div class="hero-preview">
+        <div class="orbit orbit-1"></div><div class="orbit orbit-2"></div>
+        <div class="floating-tag tag-top"><span class="sparkle">✧</span> Clear results. Real priorities.</div>
+        <div class="preview-window">
+          <div class="window-head"><div class="dots"><i></i><i></i><i></i></div><span>SiteSignal / overview</span><span class="tiny-icon">↗</span></div>
+          <div class="window-body">
+            <div class="overview-head"><div><span class="overline">EXAMPLE REPORT</span><h2>Website health</h2><span class="domain-chip"><span class="online-dot"></span> sample-store.example</span></div><span class="sample-stamp">DEMO DATA</span></div>
+            <div class="score-row"><div class="score-ring" style="--score:72"><div><strong>72</strong><small>/100</small></div></div><div class="score-explainer"><span class="status-tag">● Room to improve</span><h3>A good start.<br>Let's make it better.</h3><p>3 opportunities highlighted</p></div></div>
+            <div class="stat-tiles"><div><span>Passed</span><strong>7 <small>checks</small></strong></div><div><span>Needs work</span><strong>3 <small>checks</small></strong></div><div><span>Evaluated</span><strong>10 <small>signals</small></strong></div></div>
+            <div class="issue-list"><div><span class="issue-square orange">!</span><span>Meta description needs work</span><span class="issue-arrow">↗</span></div><div><span class="issue-square orange">!</span><span>Missing image alt attributes</span><span class="issue-arrow">↗</span></div><div><span class="issue-square green">✓</span><span>Site is indexable</span><span class="issue-arrow">↗</span></div></div>
+          </div>
+        </div>
+        <div class="floating-tag tag-bottom"><span class="tag-circle">✓</span> Made for better decisions</div>
+      </div>
+    </section>
+    <section class="info-strip page-wrap" aria-label="SiteSignal capabilities"><span>ONE LINK, BETTER INSIGHT</span><div><span>⌁</span> SEO essentials</div><div><span>▦</span> Page structure</div><div><span>⟡</span> Accessibility signals</div><div><span>◎</span> Shareable reports*</div></section>
+    <section class="features page-wrap" id="features">
+      <div class="section-top"><div><span class="eyebrow">BUILT FOR THE DETAILS</span><h2>The small things<br>make a <em>big difference.</em></h2></div><p>Not another overwhelming dashboard. A focused, practical starting point for finding issues worth fixing.</p></div>
+      <div class="feature-grid">
+        <article class="feature-card"><div class="feature-icon violet">⌕</div><h3>Search visibility basics</h3><p>Review page titles, descriptions, canonical URLs and indexing hints in a glance.</p><span>01 / DISCOVER</span></article>
+        <article class="feature-card"><div class="feature-icon aqua">▤</div><h3>On-page structure</h3><p>Check headings, language settings and viewport configuration for a better foundation.</p><span>02 / UNDERSTAND</span></article>
+        <article class="feature-card"><div class="feature-icon pink">✧</div><h3>Actionable priorities</h3><p>See clear pass/review status for each check, so the next step never feels vague.</p><span>03 / IMPROVE</span></article>
+      </div>
+    </section>
+    <section class="workspace-section" id="workspace">
+      <div class="page-wrap"><div class="section-top workspace-top"><div><span class="eyebrow">GET HANDS-ON</span><h2>See the signal.<br><em>Skip the noise.</em></h2></div><p>This interactive preview works without Cloudflare or payment credentials. Try the sample, or analyze your own HTML locally.</p></div>
+      <div class="workspace">
+        <div class="workspace-sidebar">
+          <div class="sidebar-title">YOUR WORKSPACE <span>PREVIEW</span></div>
+          <button class="side-tab active" data-tab="demo"><span>▦</span> Example report <span class="side-chev">↗</span></button>
+          <button class="side-tab" data-tab="html"><span>⌘</span> Analyze HTML <span class="side-chev">↗</span></button>
+          <button class="side-tab" data-tab="url"><span>◎</span> Live URL check <span class="side-chev">↗</span></button>
+          <div class="sidebar-foot"><span class="sidebar-symbol">✦</span><strong>Your data stays with you.</strong><p>HTML pasted here is analyzed inside your browser. No uploads.</p></div>
+        </div>
+        <div class="workspace-main">
+          <div class="workspace-toolbar"><div class="breadcrumb">Workspace <span>/</span> <strong id="viewTitle">Example report</strong></div><span class="demo-badge"><span class="pulse"></span> INTERACTIVE PREVIEW</span></div>
+          <div class="tab-panel" id="demoPanel">
+            <div class="report-heading"><div><span class="overline">SAMPLE AUDIT · NOT A LIVE SCAN</span><h3>Sample storefront <small>⌁</small></h3><p>sample-store.example &nbsp;·&nbsp; Illustrative results</p></div><button class="subtle-button" id="downloadDemo">↓ Export JSON</button></div>
+            <div id="demoReport" class="render-report"></div>
+            <div class="notice"><span>ⓘ</span> This example uses fictional sample data to demonstrate the report format. It does not scan a real website.</div>
+          </div>
+          <div class="tab-panel hidden" id="htmlPanel">
+            <div class="report-heading"><div><span class="overline">REAL ANALYSIS · LOCAL TO THIS DEVICE</span><h3>Inspect an HTML document</h3><p>Paste your page's HTML source or choose a local .html file.</p></div></div>
+            <label class="field-label" for="htmlInput">HTML SOURCE</label>
+            <textarea id="htmlInput" spellcheck="false" placeholder="<!doctype html>&#10;<html lang='en'>&#10;  <head><title>Your website</title></head>&#10;  <body><h1>Hello world</h1></body>&#10;</html>"></textarea>
+            <div class="input-actions"><label class="upload-button">↑ Choose HTML file<input type="file" id="htmlFile" accept=".html,.htm,text/html" hidden></label><button class="btn primary" id="analyzeHtml">Analyze document <span>↗</span></button></div>
+            <p class="form-note" id="htmlStatus">Uses DOMParser and 10 transparent diagnostic checks. No external requests.</p>
+            <div id="htmlReport" class="render-report"></div>
+          </div>
+          <div class="tab-panel hidden" id="urlPanel">
+            <div class="report-heading"><div><span class="overline">EXPERIMENTAL · DEPENDS ON CORS</span><h3>Check a public page</h3><p>Browsers can't fetch most third-party websites due to CORS. Server-side URL scanning will be available on Cloudflare.</p></div></div>
+            <form id="urlForm"><label class="field-label" for="urlInput">PAGE ADDRESS</label><div class="url-input-row"><input id="urlInput" type="url" value="https://example.com/" required placeholder="https://example.com/"><button class="btn primary" id="scanUrl">Try scan <span>↗</span></button></div></form>
+            <div class="notice blue" id="urlMessage"><span>ⓘ</span> For a guaranteed working demo, use <b>Example report</b> or <b>Analyze HTML</b>. A CORS failure is a browser restriction, not an audit result.</div>
+            <div id="urlReport" class="render-report"></div>
+          </div>
+        </div>
+      </div>
+      </div>
+    </section>
+    <section class="pricing-section page-wrap" id="pricing"><div class="pricing-copy"><span class="eyebrow">SIMPLE BY DESIGN</span><h2>Useful answers.<br><em>Transparent pricing.</em></h2><p>The full service is being prepared. Payment is intentionally disabled in this GitHub Pages preview.</p></div><div class="price-card"><div class="price-card-head"><span>ONE-TIME AUDIT</span><span class="coming-soon">COMING SOON</span></div><div class="price"><strong>$59</strong><span> / report</span></div><p>Planned: hosted technical snapshot + private shareable report + email delivery.</p><div class="price-lines"><div><span>✓</span> Clear technical checks</div><div><span>✓</span> Private report link</div><div><span>✓</span> No recurring charges</div></div><button type="button" id="checkoutButton" class="btn primary full">Payments not enabled yet <span>⌁</span></button><small>No card details collected in this preview.</small></div></section>
+    <section class="closing page-wrap"><span class="closing-star">✳</span><h2>Make every page count<span>.</span></h2><p>A smarter website starts with a clearer picture.</p><a class="btn primary" href="#workspace">Explore the demo <span>↗</span></a></section>
+  </main>
+  <footer class="site-footer page-wrap"><div class="brand"><span class="brand-mark">S<span></span></span><span>site<span class="brand-accent">signal</span><small>.app</small></span></div><p>Prototype · Cloudflare + Stripe integration pending. No income, ranking or conversion promises.</p><a href="https://github.com/Ltre/Ltre.biz/tree/dd100d/dd100d" target="_blank" rel="noopener noreferrer">View source ↗</a></footer>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
