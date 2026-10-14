@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "MarginPilot — SKU Profit Stress Tester",
+  "version": "0.1.0",
+  "description": "An offline-first profit stress tester for cross-border merchants. No scraping or host permissions.",
+  "action": {
+    "default_title": "Open MarginPilot",
+    "default_popup": "popup.html"
+  }
+}
