@@ -1,8 +1,7 @@
 name: Deploy dd100d preview to GitHub Pages
 on:
   push:
-    branches:
-      - dd100d
+    branches: [dd100d]
     paths:
       - 'dd100d/preview/**'
       - '.github/workflows/dd100d-pages.yml'
@@ -20,10 +19,20 @@ jobs:
     steps:
       - name: Checkout dd100d
         uses: actions/checkout@v4
+      - name: Prepare consistent published routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/sitesignal/dd100d/preview"
+          cp -a dd100d/preview/. "${RUNNER_TEMP}/sitesignal/"
+          cp -a dd100d/preview/. "${RUNNER_TEMP}/sitesignal/dd100d/preview/"
+          test -s "${RUNNER_TEMP}/sitesignal/index.html"
+          test -s "${RUNNER_TEMP}/sitesignal/dd100d/preview/index.html"
+          echo "Publishing SiteSignal as / and /dd100d/preview/"
       - name: Upload static preview
         uses: actions/upload-pages-artifact@v4
         with:
-          path: dd100d/preview
+          path: ${{ runner.temp }}/sitesignal
       - name: Downloadable preview files (no Pages activation needed)
         uses: actions/upload-artifact@v4
         with:
@@ -42,3 +51,24 @@ jobs:
       - name: Deploy Pages
         id: deploy
         uses: actions/deploy-pages@v4
+      - name: Check public URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="https://ltre.github.io/Ltre.biz"
+          for page in "/" "/dd100d/preview/"; do
+            echo "Checking ${origin}${page}"
+            valid=0
+            for attempt in 1 2 3 4 5 6; do
+              if curl --fail --location --silent --show-error --max-time 15 "${origin}${page}" -o /tmp/page.html && grep -Eiq 'SiteSignal|site.?signal' /tmp/page.html; then
+                valid=1
+                echo "OK: ${origin}${page}"
+                break
+              fi
+              sleep 4
+            done
+            if [ "$valid" -ne 1 ]; then
+              echo "::error::Public preview not yet responding at ${origin}${page}"
+              exit 1
+            fi
+          done
