@@ -1,0 +1,1 @@
+{"$schema":"./node_modules/wrangler/config-schema.json","name":"dd100d-sitesignal","main":"src/index.js","compatibility_date":"2026-09-01","observability":{"enabled":true},"kv_namespaces":[{"binding":"REPORTS","id":"REPLACE_WITH_YOUR_CLOUDFLARE_KV_ID"}]}
