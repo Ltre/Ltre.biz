@@ -7,4 +7,7 @@ miaoshou-erp/temu-product-auto-selector-260919/server/.wrangler/
 # temu-product-auto-selector-260919  file
 miaoshou-erp/temu-product-auto-selector-260919/server/.dev.vars
 
-
+# LLM-Server
+LLM-Server/.wrangler/
+LLM-Server/.dev.vars
+LLM-Server/node_modules/
