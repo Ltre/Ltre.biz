@@ -1,0 +1,15 @@
+HTTP_PROXY="http://127.0.0.1:58591"
+HTTPS_PROXY="http://127.0.0.1:58591"
+ALL_PROXY="socks5h://127.0.0.1:58591"
+NO_PROXY="localhost,127.0.0.1,::1"  
+
+
+
+
+https://github.com/openai/codex/issues/29418#issuecomment-4831792926
+https://github.com/openai/codex/issues/29418#top
+https://github.com/openai/codex/issues/29952
+https://github.com/openai/codex/issues/13519
+https://github.com/openai/codex/issues/15287
+https://github.com/openai/codex/issues/14297
+
