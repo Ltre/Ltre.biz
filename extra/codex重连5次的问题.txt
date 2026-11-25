@@ -13,3 +13,16 @@ https://github.com/openai/codex/issues/13519
 https://github.com/openai/codex/issues/15287
 https://github.com/openai/codex/issues/14297
 
+
+CodeX 老是： 正在重新连接5/5 、 正在思考...... 教你 1 招搞定！
+https://x.com/yunxi0623/article/2074818514612035683
+
+
+Codex 一直 Reconnecting？我最后发现，常见就两个坑
+https://developer.cloud.tencent.com/article/2685939?policyId=1004
+
+Ghost Proxifier Pro上下游网络代理工具
+https://ghostproxifier.com/
+https://github.com/liliBestCoder/ghost-proxifier-pro
+
+
