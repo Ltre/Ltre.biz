@@ -54,17 +54,6 @@ func formatDiagnosticLog(r doctor.Report) string {
 	}
 	return b.String()
 }
-func (a *app) toggleDiagnosticLog() {
-	if a.diagnosticScroll.Parent() == nil {
-		a.root.AddChild(a.diagnosticScroll)
-		a.rawButton.SetTitle("收起完整诊断日志")
-	} else {
-		a.root.RemoveChild(a.diagnosticScroll)
-		a.rawButton.SetTitle("展开完整诊断日志")
-	}
-	a.root.MarkForLayoutAndRedraw()
-}
-
 func shorten(s string, max int) string {
 	s = strings.Join(strings.Fields(s), " ")
 	r := []rune(s)
@@ -144,15 +133,19 @@ func showTextWindow(title, text string) {
 	}
 	content := w.Content()
 	content.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 8})
-	content.SetBorder(unison.NewEmptyBorder(geom.NewUniformInsets(16)))
-	label := unison.NewLabel()
-	label.SetTitle(title)
+	content.SetBorder(unison.NewEmptyBorder(geom.NewUniformInsets(20)))
+	paintSurface(content, canvasColor, 0)
+	label := makeLabel(title, 18, textColor, true)
 	content.AddChild(label)
 	field := unison.NewMultiLineField()
+	field.Font = font(13, false)
+	field.EditableInk = cardColor
+	field.OnEditableInk = textColor
 	field.SetWrap(true)
 	field.SetText(text)
 	readableLogField(field)
 	scroll := unison.NewScrollPanel()
+	scroll.BackgroundInk = cardColor
 	scroll.SetContent(field, behavior.Fill, behavior.Fill)
 	scroll.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, VAlign: align.Fill, HGrab: true, VGrab: true})
 	content.AddChild(scroll)
@@ -166,8 +159,7 @@ func (a *app) renderProblems(report doctor.Report) {
 	a.status.SetTitle(fmt.Sprintf("诊断完成 · %d 项需要关注 · Codex %s", len(problems), report.CodexVersion))
 	a.status.MarkForLayoutAndRedraw()
 	if len(problems) == 0 {
-		label := unison.NewLabel()
-		label.SetTitle("✓ 没有报告警告或失败。")
+		label := makeLabel("✓  没有报告警告或失败。", 14, mutedColor, false)
 		a.problemPanel.AddChild(label)
 	}
 	for _, check := range problems {
@@ -175,33 +167,34 @@ func (a *app) renderProblems(report doctor.Report) {
 		card := unison.NewPanel()
 		card.SetLayout(&unison.FlexLayout{Columns: 2, HSpacing: 14})
 		card.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, HGrab: true})
-		card.SetBorder(unison.NewCompoundBorder(unison.NewLineBorder(unison.ThemeSurfaceEdge, geom.NewUniformSize(5), geom.NewUniformInsets(1), false), unison.NewEmptyBorder(geom.NewUniformInsets(12))))
+		paintSurface(card, cardColor, 11)
+		card.SetBorder(unison.NewCompoundBorder(unison.NewLineBorder(borderColor, geom.NewUniformSize(11), geom.NewUniformInsets(1), false), unison.NewEmptyBorder(geom.NewUniformInsets(15))))
 		info := unison.NewPanel()
 		info.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 5})
 		info.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, HGrab: true})
 		card.AddChild(info)
-		title := unison.NewLabel()
-		if strings.EqualFold(c.Status, "fail") {
-			title.OnBackgroundInk = unison.ThemeError
+		statusInk := warningColor
+		if strings.EqualFold(c.Status, "fail") || strings.EqualFold(c.Status, "error") {
+			statusInk = failureColor
 		}
-		title.SetTitle(statusName(c.Status) + "  ·  " + problemName(c))
+		title := makeLabel(statusName(c.Status)+"  ·  "+problemName(c), 15, statusInk, true)
 		info.AddChild(title)
-		summary := unison.NewLabel()
-		summary.SetTitle(shorten(c.Summary, 65))
+		summary := makeLabel(shorten(c.Summary, 26), 13, textColor, false)
 		info.AddChild(summary)
-		guidance := unison.NewLabel()
-		guidance.SetTitle(shorten(doctor.Guidance(c), 55))
+		guidance := makeLabel(shorten(doctor.Guidance(c), 20), 12, mutedColor, false)
 		info.AddChild(guidance)
 		actions := unison.NewPanel()
-		actions.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 6})
+		actions.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 8})
 		card.AddChild(actions)
 		detail := unison.NewButton()
+		styleButton(detail, false)
 		detail.SetTitle("查看详情")
 		detail.ClickCallback = func() { showTextWindow(problemName(c)+" · 详情", detailsText(c)) }
 		actions.AddChild(detail)
 		row := problemRow{check: c, card: card, details: detail}
 		if actionableWebSocket(c) {
 			repair := unison.NewButton()
+			styleButton(repair, true)
 			repair.SetTitle("修复 WebSocket 问题")
 			repair.ClickCallback = func() { a.fix(c.ID) }
 			actions.AddChild(repair)

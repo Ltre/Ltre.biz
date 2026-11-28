@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"image/png"
+	"math"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -33,7 +34,7 @@ func TestMockDiagnosisShowsSeparateProblemCards(t *testing.T) {
 	t.Cleanup(func() { discoverCandidates, discoverActive, runDoctorReport = oldDiscover, oldActive, oldDoctor })
 	var ui *app
 	var err error
-	screen, e := unison.StartHeadless(unison.HeadlessConfig{Width: 1000, Height: 700}, unison.StartupFinishedCallback(func() { ui, err = newApp() }))
+	screen, e := unison.StartHeadless(unison.HeadlessConfig{Width: 1100, Height: 850}, unison.StartupFinishedCallback(func() { ui, err = newApp() }))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -59,9 +60,42 @@ func TestMockDiagnosisShowsSeparateProblemCards(t *testing.T) {
 	if !done {
 		t.Fatal("mocked report did not produce three separate cards")
 	}
+	for _, width := range []float32{600, 680, 760, 900} {
+		screen.Do(func() { ui.window.SetContentRect(geom.NewRect(50, 50, width, 700)) })
+		screen.Sync()
+		screen.Do(func() {
+			left, right := ui.leftColumn.FrameRect().Width, ui.rightColumn.FrameRect().Width
+			if left+right <= 0 || math.Abs(float64(left/(left+right))-0.618) > 0.002 {
+				t.Errorf("incorrect ratio after resize to %v: %v/%v", width, left, right)
+			}
+			if len(ui.problemRows) > 0 && ui.problemRows[0].repair != nil {
+				button := ui.problemRows[0].repair
+				buttonRect := button.RectToRoot(button.ContentRect(true))
+				leftRect := ui.leftColumn.RectToRoot(ui.leftColumn.ContentRect(true))
+				if buttonRect.Right() > leftRect.Right()+1 {
+					t.Errorf("repair button clipped after resize to %v", width)
+				}
+			}
+			leftRect := ui.leftColumn.RectToRoot(ui.leftColumn.ContentRect(true))
+			rightRect := ui.rightColumn.RectToRoot(ui.rightColumn.ContentRect(true))
+			for _, row := range ui.problemRows {
+				cardRect := row.card.RectToRoot(row.card.ContentRect(true))
+				if cardRect.Right() > leftRect.Right()+1 || cardRect.Right() > rightRect.X {
+					t.Errorf("problem card overlaps right column at width %v", width)
+				}
+			}
+			if ui.rawButton.Parent() != ui.rightColumn || ui.logButton.Parent() != ui.rightColumn {
+				t.Error("log buttons must belong to right column")
+			}
+		})
+	}
 	screen.Do(func() {
-		if ui.diagnosticScroll.Parent() != nil {
-			t.Error("diagnostic log must be collapsed by default")
+		if ui.viewerKind != "" {
+			t.Error("diagnostic log must be closed by default")
+		}
+		left, right := ui.leftColumn.FrameRect().Width, ui.rightColumn.FrameRect().Width
+		if left+right <= 0 || math.Abs(float64(left/(left+right))-0.618) > 0.002 {
+			t.Errorf("columns should divide available width 61.8/38.2: left=%v right=%v", left, right)
 		}
 		for _, row := range ui.problemRows {
 			if row.details == nil || row.details.Parent() == nil {
@@ -93,21 +127,23 @@ func TestMockDiagnosisShowsSeparateProblemCards(t *testing.T) {
 	var logVisible bool
 	var maxScroll float32
 	screen.Do(func() {
-		logVisible = ui.diagnosticScroll.Parent() != nil
-		maxScroll = ui.diagnosticScroll.Bar(false).MaxValue()
+		logVisible = ui.viewerKind == "diagnostic" && ui.viewerScroll != nil && ui.viewerScroll.Parent() == ui.root
+		if ui.viewerScroll != nil {
+			maxScroll = ui.viewerScroll.Bar(false).MaxValue()
+		}
 		if !strings.Contains(ui.diagnosticLog.Text(), "last report line") || !strings.Contains(ui.diagnosticLog.Text(), "mock stderr line") {
 			t.Error("full stdout and stderr should be retained")
 		}
 	})
 	if !logVisible {
-		t.Fatal("diagnostic log did not expand")
+		t.Fatal("diagnostic log did not open inside the application window")
 	}
 	if maxScroll <= 0 {
 		t.Fatal("expanded diagnostic log must be scrollable")
 	}
 	var originalLog string
 	screen.Do(func() { originalLog = ui.diagnosticLog.Text() })
-	screen.Click(screen.PanelCenter(ui.diagnosticScroll))
+	screen.Click(screen.PanelCenter(ui.viewerScroll))
 	screen.Type("unexpected edit")
 	screen.KeyPress(unison.KeyBackspace, mod.None)
 	screen.Do(func() {
@@ -125,18 +161,26 @@ func TestMockDiagnosisShowsSeparateProblemCards(t *testing.T) {
 			t.Fatal(e)
 		}
 	}
-	screen.Wheel(screen.PanelCenter(ui.diagnosticScroll), geom.NewPoint(0, -3), mod.None)
+	screen.Wheel(screen.PanelCenter(ui.viewerScroll), geom.NewPoint(0, -3), mod.None)
 	var scrolled float32
-	screen.Do(func() { scrolled = ui.diagnosticScroll.Bar(false).Value() })
+	screen.Do(func() { scrolled = ui.viewerScroll.Bar(false).Value() })
 	if scrolled <= 0 {
 		t.Error("mouse wheel did not scroll diagnostic log")
 	}
-	screen.Click(screen.PanelCenter(ui.rawButton))
+	screen.Do(func() { ui.setLog("模拟后台状态更新") })
+	screen.Click(screen.PanelCenter(ui.backButton))
 	screen.Do(func() {
-		if ui.diagnosticScroll.Parent() != nil {
-			t.Error("diagnostic log did not collapse")
+		if ui.viewerKind != "" || len(ui.problemRows) != 3 || ui.rawButton.Parent() != ui.rightColumn {
+			t.Error("return must restore the same dashboard and issue cards")
 		}
 	})
+	screen.Click(screen.PanelCenter(ui.logButton))
+	screen.Do(func() {
+		if ui.viewerKind != "operations" || ui.viewerScroll == nil || !strings.Contains(ui.output.Text(), "模拟后台状态更新") {
+			t.Error("operation log must open in the same window and contain the latest state")
+		}
+	})
+	screen.Click(screen.PanelCenter(ui.backButton))
 	healthy.Store(true)
 	screen.Click(screen.PanelCenter(ui.diagnose))
 	done = false
@@ -179,4 +223,35 @@ func TestProblemDetailsPreserveDiagnosticEvidence(t *testing.T) {
 	if actionableWebSocket(c) {
 		t.Fatal("MCP warning must not offer websocket repair")
 	}
+}
+
+func TestMultipleCandidatesRemainSelectable(t *testing.T) {
+	oldDiscover, oldActive := discoverCandidates, discoverActive
+	discoverCandidates = func(string) ([]doctor.Candidate, error) {
+		return []doctor.Candidate{{Path: `C:\mock\one\codex.exe`}, {Path: `C:\mock\two\codex.exe`}}, nil
+	}
+	discoverActive = func() ([]string, error) { return nil, nil }
+	t.Cleanup(func() { discoverCandidates, discoverActive = oldDiscover, oldActive })
+	var ui *app
+	var initErr error
+	screen, err := unison.StartHeadless(unison.HeadlessConfig{Width: 1100, Height: 850}, unison.StartupFinishedCallback(func() { ui, initErr = newApp() }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(screen.Stop)
+	if initErr != nil {
+		t.Fatal(initErr)
+	}
+	screen.Do(func() {
+		if ui.candidates.Parent() == nil {
+			t.Error("multiple candidates must show selector")
+		}
+		if ui.path.Text() != "" {
+			t.Error("ambiguous candidates must not be selected automatically")
+		}
+		ui.candidates.ChoiceMadeCallback(ui.candidates, 1, `C:\mock\two\codex.exe`)
+		if ui.path.Text() != `C:\mock\two\codex.exe` {
+			t.Error("selection must set executable path")
+		}
+	})
 }

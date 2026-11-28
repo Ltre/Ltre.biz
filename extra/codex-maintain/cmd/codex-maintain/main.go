@@ -25,9 +25,16 @@ type app struct {
 	status           *unison.Label
 	problemPanel     *unison.Panel
 	problemRows      []problemRow
+	resultArea       *unison.Panel
+	leftColumn       *unison.Panel
+	rightColumn      *unison.Panel
 	rawButton        *unison.Button
+	logButton        *unison.Button
 	diagnosticLog    *unison.Field
-	diagnosticScroll *unison.ScrollPanel
+	viewerKind       string
+	viewerScroll     *unison.ScrollPanel
+	backButton       *unison.Button
+	savedDashboard   []*unison.Panel
 	diagnose, verify *unison.Button
 	cancelButton     *unison.Button
 	cancel           context.CancelFunc
@@ -56,31 +63,45 @@ func newApp() (*app, error) {
 	}
 	a := &app{window: w, root: w.Content()}
 	a.root.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 10})
-	a.root.SetBorder(unison.NewEmptyBorder(geom.NewUniformInsets(18)))
-	label := unison.NewLabel()
-	label.SetTitle("Codex 桌面端诊断与 WebSocket 修复")
-	a.root.AddChild(label)
-	hint := unison.NewLabel()
-	hint.SetTitle("程序路径（如找到多个版本，请核对当前桌面端后选择或粘贴路径）")
+	a.root.SetBorder(unison.NewEmptyBorder(geom.NewUniformInsets(24)))
+	paintSurface(a.root, canvasColor, 0)
+	header := unison.NewPanel()
+	header.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 5})
+	a.root.AddChild(header)
+	header.AddChild(makeLabel("CODEX MAINTAIN  /  健康检查", 11, accentColor, true))
+	header.AddChild(makeLabel("Codex 诊断中心", 23, textColor, true))
+	header.AddChild(makeLabel("检查连接与运行状态，逐项查看问题并安全修复。", 13, mutedColor, false))
+	hint := makeLabel("CODEX 程序路径", 11, mutedColor, true)
 	a.root.AddChild(hint)
 	a.path = unison.NewField()
+	a.path.Font = font(13, false)
+	a.path.EditableInk = cardColor
+	a.path.OnEditableInk = textColor
 	a.path.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, HGrab: true})
 	a.root.AddChild(a.path)
 	a.candidates = unison.NewPopupMenu[string]()
+	a.candidates.Font = font(13, false)
+	a.candidates.BackgroundInk = cardColor
+	a.candidates.OnBackgroundInk = textColor
+	a.candidates.EdgeInk = borderColor
+	a.candidates.CornerRadius = geom.NewUniformSize(7)
+	a.candidates.VMargin = 5
 	a.candidates.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, HGrab: true})
 	a.candidates.ChoiceMadeCallback = func(p *unison.PopupMenu[string], index int, item string) { p.SelectIndex(index); a.path.SetText(item) }
-	a.root.AddChild(a.candidates)
 	row := unison.NewPanel()
 	row.SetLayout(&unison.FlexLayout{Columns: 3, HSpacing: 10})
 	a.root.AddChild(row)
 	a.diagnose = unison.NewButton()
+	styleButton(a.diagnose, true)
 	a.diagnose.SetTitle("执行 Codex 诊断")
 	a.diagnose.ClickCallback = a.runDoctor
 	row.AddChild(a.diagnose)
 	a.verify = unison.NewButton()
+	styleButton(a.verify, false)
 	a.verify.SetTitle("重启后验证")
 	a.verify.ClickCallback = a.verifyAfter
 	a.cancelButton = unison.NewButton()
+	styleButton(a.cancelButton, false)
 	a.cancelButton.SetTitle("取消当前操作")
 	a.cancelButton.ClickCallback = func() {
 		if a.cancel != nil {
@@ -89,42 +110,62 @@ func newApp() (*app, error) {
 			a.add("已请求取消，正在等待当前步骤结束……")
 		}
 	}
-	tools := unison.NewPanel()
-	tools.SetLayout(&unison.FlexLayout{Columns: 2, HSpacing: 10})
-	a.root.AddChild(tools)
-	a.rawButton = unison.NewButton()
-	a.rawButton.SetTitle("展开完整诊断日志")
-	a.rawButton.SetEnabled(false)
-	a.rawButton.ClickCallback = a.toggleDiagnosticLog
-	tools.AddChild(a.rawButton)
-	logButton := unison.NewButton()
-	logButton.SetTitle("查看操作记录")
-	logButton.ClickCallback = func() { showTextWindow("操作记录", a.output.Text()) }
-	tools.AddChild(logButton)
-	a.status = unison.NewLabel()
+	a.status = makeLabel("", 13, mutedColor, false)
 	a.status.SetTitle("尚未诊断：请选择 Codex 程序并执行诊断")
 	a.root.AddChild(a.status)
-	outputLabel := unison.NewLabel()
-	outputLabel.SetTitle("最近一次完整诊断的问题")
-	a.root.AddChild(outputLabel)
 	a.output = unison.NewMultiLineField()
+	a.output.Font = font(13, false)
+	a.output.EditableInk = cardColor
+	a.output.OnEditableInk = textColor
 	a.output.SetWrap(true)
+	readableLogField(a.output)
 	a.output.SetText("请选择 Codex 程序并执行诊断。工具不会在诊断阶段修改配置。")
+	a.resultArea = unison.NewPanel()
+	a.resultArea.SetLayout(&resultColumns{gap: 16})
+	a.resultArea.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, VAlign: align.Fill, HGrab: true, VGrab: true})
+	a.root.AddChild(a.resultArea)
+	a.leftColumn = unison.NewPanel()
+	a.leftColumn.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 10})
+	a.resultArea.AddChild(a.leftColumn)
+	a.leftColumn.AddChild(makeLabel("诊断结果  ·  最近一次完整检查", 15, textColor, true))
 	a.problemPanel = unison.NewPanel()
 	a.problemPanel.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 10})
 	placeholder := unison.NewLabel()
+	placeholder.Font = font(14, false)
+	placeholder.OnBackgroundInk = mutedColor
 	placeholder.SetTitle("执行诊断后，问题会逐项显示在这里。")
 	a.problemPanel.AddChild(placeholder)
 	scroll := unison.NewScrollPanel()
+	scroll.BackgroundInk = canvasColor
 	scroll.SetContent(a.problemPanel, behavior.Follow, behavior.Unmodified)
 	scroll.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, VAlign: align.Fill, HGrab: true, VGrab: true})
-	a.root.AddChild(scroll)
+	a.leftColumn.AddChild(scroll)
+	a.rightColumn = unison.NewPanel()
+	a.rightColumn.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 12})
+	a.rightColumn.SetBorder(unison.NewCompoundBorder(unison.NewLineBorder(borderColor, geom.NewUniformSize(11), geom.NewUniformInsets(1), false), unison.NewEmptyBorder(geom.NewUniformInsets(16))))
+	paintSurface(a.rightColumn, cardColor, 11)
+	a.resultArea.AddChild(a.rightColumn)
+	a.rightColumn.AddChild(makeLabel("日志与记录", 15, textColor, true))
+	a.rightColumn.AddChild(makeLabel("在窗口内查看完整内容", 12, mutedColor, false))
+	a.rawButton = unison.NewButton()
+	styleButton(a.rawButton, false)
+	a.rawButton.SetTitle("展开完整诊断日志")
+	a.rawButton.SetEnabled(false)
+	a.rawButton.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, HGrab: true})
+	a.rawButton.ClickCallback = func() { a.openViewer("diagnostic") }
+	a.rightColumn.AddChild(a.rawButton)
+	a.logButton = unison.NewButton()
+	styleButton(a.logButton, false)
+	a.logButton.SetTitle("查看操作记录")
+	a.logButton.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, HGrab: true})
+	a.logButton.ClickCallback = func() { a.openViewer("operations") }
+	a.rightColumn.AddChild(a.logButton)
 	a.diagnosticLog = unison.NewMultiLineField()
+	a.diagnosticLog.Font = font(13, false)
+	a.diagnosticLog.EditableInk = cardColor
+	a.diagnosticLog.OnEditableInk = textColor
 	a.diagnosticLog.SetWrap(true)
 	readableLogField(a.diagnosticLog)
-	a.diagnosticScroll = unison.NewScrollPanel()
-	a.diagnosticScroll.SetContent(a.diagnosticLog, behavior.Follow, behavior.Unmodified)
-	a.diagnosticScroll.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, HGrab: true, SizeHint: geom.NewSize(0, 180), MinSize: geom.NewSize(0, 120)})
 	root, err := doctor.DefaultRoot()
 	if err == nil {
 		candidates, e := discoverCandidates(root)
@@ -137,6 +178,7 @@ func newApp() (*app, error) {
 				a.candidates.SelectIndex(0)
 			}
 			if len(candidates) > 1 {
+				a.root.AddChildAtIndex(a.candidates, a.root.IndexOfChild(a.path)+1)
 				active, activeErr := discoverActive()
 				match := -1
 				if activeErr == nil {
@@ -170,7 +212,7 @@ func newApp() (*app, error) {
 			a.setLog("查找桌面端程序失败：" + e.Error())
 		}
 	}
-	w.SetContentRect(geom.NewRect(50, 50, 900, 650))
+	w.SetContentRect(geom.NewRect(50, 50, 900, 700))
 	w.ToFront()
 	return a, nil
 }
