@@ -329,7 +329,7 @@ curl.exe -sS -o NUL --max-time 20 --proxy http://127.0.0.1:实际端口 -w "HTTP
 	
 
 
-答：
+【做得跟屎一样，还不如直接用命令行！】答：
 
 
 
@@ -468,5 +468,22 @@ curl.exe -sS -o NUL --max-time 20 --proxy http://127.0.0.1:实际端口 -w "HTTP
 	internal/desktop/desktop_windows_test.gointernal/desktop/desktop_windows_test.go+19-0
 
 	internal/childproc/hidden_windows.gointernal/childproc/hidden_windows.go+10-0
+
+
+
+问：
+
+
+
+	操你妈！你他妈的做得跟屎一样！老子让你做的是可视化呈现有问题的项目，你他妈直接输入检查结果！那我他妈还不如直接用命令行，还要用你个鸡巴？
+
+	你他妈看我原始需求没有？你个屌毛玩意儿！不会把问题点规整地用UI组件可视化列出来吗？然后要在问题点右边提供修复按钮！目前先提供websosket的修复按钮！
+	上下文你去看 `extra\codex-maintain\prompt\prompt-log` 目录里的文档！
+
+
+
+
+答：
+
 
 

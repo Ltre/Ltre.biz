@@ -19,11 +19,12 @@ import (
 )
 
 type Issue struct {
-	Severity string  `json:"severity"`
-	Cause    string  `json:"cause"`
-	Measured *string `json:"measured"`
-	Expected *string `json:"expected"`
-	Remedy   *string `json:"remedy"`
+	Severity string   `json:"severity"`
+	Cause    string   `json:"cause"`
+	Measured *string  `json:"measured"`
+	Expected *string  `json:"expected"`
+	Remedy   *string  `json:"remedy"`
+	Fields   []string `json:"fields"`
 }
 type Check struct {
 	ID          string   `json:"id"`
@@ -40,6 +41,8 @@ type Report struct {
 	CodexVersion  string  `json:"codexVersion"`
 	Checks        []Check `json:"checks"`
 	Raw           string  `json:"-"`
+	Stderr        string  `json:"-"`
+	ExitError     string  `json:"-"`
 }
 type Candidate struct {
 	Path     string
@@ -231,14 +234,19 @@ func Run(ctx context.Context, exe string, networkOnly, override bool) (Report, e
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		return Report{}, fmt.Errorf("诊断超时或已取消：%w", ctx.Err())
+		return Report{Raw: stdout.String(), Stderr: stderr.String()}, fmt.Errorf("诊断超时或已取消：%w", ctx.Err())
 	}
 	report, parseErr := Parse(stdout.Bytes())
+	report.Raw = stdout.String()
+	report.Stderr = stderr.String()
+	if err != nil {
+		report.ExitError = err.Error()
+	}
 	if parseErr != nil && err != nil {
-		return Report{}, fmt.Errorf("doctor 执行失败：%w；%s", err, strings.TrimSpace(stderr.String()))
+		return report, fmt.Errorf("doctor 执行失败：%w；%s", err, strings.TrimSpace(stderr.String()))
 	}
 	if parseErr != nil {
-		return Report{}, parseErr
+		return report, parseErr
 	}
 	return report, nil
 }

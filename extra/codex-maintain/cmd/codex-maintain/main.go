@@ -17,19 +17,25 @@ import (
 )
 
 type app struct {
-	window                   *unison.Window
-	root                     *unison.Panel
-	path                     *unison.Field
-	candidates               *unison.PopupMenu[string]
-	output                   *unison.Field
-	diagnose, repair, verify *unison.Button
-	cancelButton             *unison.Button
-	cancel                   context.CancelFunc
-	report                   doctor.Report
-	exe                      string
-	proxy                    proxy.Candidate
-	busy                     bool
-	restarted                bool
+	window           *unison.Window
+	root             *unison.Panel
+	path             *unison.Field
+	candidates       *unison.PopupMenu[string]
+	output           *unison.Field
+	status           *unison.Label
+	problemPanel     *unison.Panel
+	problemRows      []problemRow
+	rawButton        *unison.Button
+	diagnosticLog    *unison.Field
+	diagnosticScroll *unison.ScrollPanel
+	diagnose, verify *unison.Button
+	cancelButton     *unison.Button
+	cancel           context.CancelFunc
+	report           doctor.Report
+	exe              string
+	proxy            proxy.Candidate
+	busy             bool
+	restarted        bool
 }
 
 var discoverCandidates = doctor.Discover
@@ -71,9 +77,6 @@ func newApp() (*app, error) {
 	a.diagnose.SetTitle("执行 Codex 诊断")
 	a.diagnose.ClickCallback = a.runDoctor
 	row.AddChild(a.diagnose)
-	a.repair = unison.NewButton()
-	a.repair.SetTitle("修复 WebSocket 问题")
-	a.repair.ClickCallback = a.fix
 	a.verify = unison.NewButton()
 	a.verify.SetTitle("重启后验证")
 	a.verify.ClickCallback = a.verifyAfter
@@ -86,16 +89,42 @@ func newApp() (*app, error) {
 			a.add("已请求取消，正在等待当前步骤结束……")
 		}
 	}
+	tools := unison.NewPanel()
+	tools.SetLayout(&unison.FlexLayout{Columns: 2, HSpacing: 10})
+	a.root.AddChild(tools)
+	a.rawButton = unison.NewButton()
+	a.rawButton.SetTitle("展开完整诊断日志")
+	a.rawButton.SetEnabled(false)
+	a.rawButton.ClickCallback = a.toggleDiagnosticLog
+	tools.AddChild(a.rawButton)
+	logButton := unison.NewButton()
+	logButton.SetTitle("查看操作记录")
+	logButton.ClickCallback = func() { showTextWindow("操作记录", a.output.Text()) }
+	tools.AddChild(logButton)
+	a.status = unison.NewLabel()
+	a.status.SetTitle("尚未诊断：请选择 Codex 程序并执行诊断")
+	a.root.AddChild(a.status)
 	outputLabel := unison.NewLabel()
-	outputLabel.SetTitle("诊断结果与操作记录")
+	outputLabel.SetTitle("最近一次完整诊断的问题")
 	a.root.AddChild(outputLabel)
 	a.output = unison.NewMultiLineField()
 	a.output.SetWrap(true)
 	a.output.SetText("请选择 Codex 程序并执行诊断。工具不会在诊断阶段修改配置。")
+	a.problemPanel = unison.NewPanel()
+	a.problemPanel.SetLayout(&unison.FlexLayout{Columns: 1, VSpacing: 10})
+	placeholder := unison.NewLabel()
+	placeholder.SetTitle("执行诊断后，问题会逐项显示在这里。")
+	a.problemPanel.AddChild(placeholder)
 	scroll := unison.NewScrollPanel()
-	scroll.SetContent(a.output, behavior.Fill, behavior.Fill)
+	scroll.SetContent(a.problemPanel, behavior.Follow, behavior.Unmodified)
 	scroll.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, VAlign: align.Fill, HGrab: true, VGrab: true})
 	a.root.AddChild(scroll)
+	a.diagnosticLog = unison.NewMultiLineField()
+	a.diagnosticLog.SetWrap(true)
+	readableLogField(a.diagnosticLog)
+	a.diagnosticScroll = unison.NewScrollPanel()
+	a.diagnosticScroll.SetContent(a.diagnosticLog, behavior.Follow, behavior.Unmodified)
+	a.diagnosticScroll.SetLayoutData(&unison.FlexLayoutData{HAlign: align.Fill, HGrab: true, SizeHint: geom.NewSize(0, 180), MinSize: geom.NewSize(0, 120)})
 	root, err := doctor.DefaultRoot()
 	if err == nil {
 		candidates, e := discoverCandidates(root)
@@ -132,13 +161,13 @@ func newApp() (*app, error) {
 					paths = append(paths, c.Path)
 				}
 				if match >= 0 {
-					a.output.SetText("根据当前桌面端进程选择了匹配程序；仍可手动更改。\n" + strings.Join(paths, "\n"))
+					a.setLog("根据当前桌面端进程选择了匹配程序；仍可手动更改。\n" + strings.Join(paths, "\n"))
 				} else {
-					a.output.SetText("发现多个程序且未能唯一确认当前版本，请从列表选择后再诊断：\n" + strings.Join(paths, "\n"))
+					a.setLog("发现多个程序且未能唯一确认当前版本，请从列表选择后再诊断：\n" + strings.Join(paths, "\n"))
 				}
 			}
 		} else if e != nil {
-			a.output.SetText("查找桌面端程序失败：" + e.Error())
+			a.setLog("查找桌面端程序失败：" + e.Error())
 		}
 	}
 	w.SetContentRect(geom.NewRect(50, 50, 900, 650))
@@ -148,7 +177,11 @@ func newApp() (*app, error) {
 func (a *app) setBusy(b bool) {
 	a.busy = b
 	a.diagnose.SetEnabled(!b)
-	a.repair.SetEnabled(!b)
+	for _, row := range a.problemRows {
+		if row.repair != nil {
+			row.repair.SetEnabled(!b)
+		}
+	}
 	a.verify.SetEnabled(!b)
 	row := a.diagnose.Parent()
 	if row != nil {
@@ -164,21 +197,17 @@ func (a *app) setBusy(b bool) {
 		row.MarkForLayoutAndRedraw()
 	}
 }
-func (a *app) showRepair(show bool) {
-	row := a.diagnose.Parent()
-	if row == nil {
-		return
-	}
-	if show {
-		if row.IndexOfChild(a.repair) < 0 {
-			row.AddChild(a.repair)
-		}
-	} else {
-		row.RemoveChild(a.repair)
-	}
-	row.MarkForLayoutAndRedraw()
+func (a *app) setLog(s string) {
+	a.output.SetText(s)
+	lines := strings.SplitN(s, "\n", 2)
+	a.status.SetTitle(shorten(lines[0], 90))
+	a.status.MarkForLayoutAndRedraw()
 }
-func (a *app) add(s string) { a.output.SetText(a.output.Text() + "\n" + s) }
+func (a *app) add(s string) {
+	a.setLog(a.output.Text() + "\n" + s)
+	a.status.SetTitle(shorten(s, 90))
+	a.status.MarkForLayoutAndRedraw()
+}
 func (a *app) runDoctor() {
 	if a.busy {
 		return
@@ -191,15 +220,25 @@ func (a *app) runDoctor() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	a.cancel = cancel
 	a.setBusy(true)
-	a.showRepair(false)
-	a.output.SetText("正在运行完整诊断，请稍候……")
+	a.rawButton.SetEnabled(false)
+	a.diagnosticLog.SetText("诊断进行中……")
+	a.problemPanel.RemoveAllChildren()
+	a.problemRows = nil
+	a.problemPanel.MarkForLayoutAndRedraw()
+	a.setLog("正在运行完整诊断，请稍候……")
 	go func() {
 		defer cancel()
 		r, err := runDoctorReport(ctx, a.exe, false, false)
 		unison.InvokeTask(func() {
 			a.setBusy(false)
+			logText := formatDiagnosticLog(r)
 			if err != nil {
-				a.output.SetText("诊断未完成：" + err.Error())
+				logText += "\n诊断未完成：" + err.Error() + "\n"
+			}
+			a.diagnosticLog.SetText(logText)
+			a.rawButton.SetEnabled(err != nil || r.Raw != "" || r.Stderr != "" || r.ExitError != "")
+			if err != nil {
+				a.setLog("诊断未完成：" + err.Error())
 				return
 			}
 			a.report = r
@@ -231,16 +270,12 @@ func (a *app) runDoctor() {
 					fmt.Fprintf(&b, "  建议：%s\n", *c.Remediation)
 				}
 			}
-			b.WriteString("\n--- 脱敏原始 JSON ---\n")
-			b.WriteString(r.Raw)
-			a.output.SetText(b.String())
-			if c, ok := r.WebSocket(); ok && c.Status != "ok" {
-				a.showRepair(true)
-			}
+			a.setLog(b.String())
+			a.renderProblems(r)
 		})
 	}()
 }
-func (a *app) fix() {
+func (a *app) fix(checkID string) {
 	if a.busy {
 		return
 	}
@@ -248,13 +283,20 @@ func (a *app) fix() {
 		unison.ErrorDialogWithMessage("程序路径已改变", "请先重新执行诊断。")
 		return
 	}
-	if c, ok := a.report.WebSocket(); !ok || c.Status == "ok" {
+	valid := false
+	for _, c := range a.report.Checks {
+		if c.ID == checkID && actionableWebSocket(c) {
+			valid = true
+			break
+		}
+	}
+	if !valid {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	a.cancel = cancel
 	a.setBusy(true)
-	a.output.SetText("正在读取系统代理并测试网络；配置尚未修改……")
+	a.setLog("正在读取系统代理并测试网络；配置尚未修改……")
 	go func() {
 		defer cancel()
 		result, e := workflow.Repair(ctx, a.exe, workflow.RealDependencies())
@@ -265,7 +307,7 @@ func (a *app) fix() {
 		unison.InvokeTask(func() {
 			a.proxy = result.Proxy
 			a.setBusy(false)
-			a.output.SetText(fmt.Sprintf("代理和临时 WebSocket 检查通过。\n%s\n配置：%s\n修改：%v；备份：%s\n\n配置已就绪。重启桌面端后点击‘重启后验证’。", result.Log, result.ConfigPath, result.Config.Changed, result.Config.Backup))
+			a.setLog(fmt.Sprintf("代理和临时 WebSocket 检查通过。\n%s\n配置：%s\n修改：%v；备份：%s\n\n配置已就绪。重启桌面端后点击‘重启后验证’。", result.Log, result.ConfigPath, result.Config.Changed, result.Config.Backup))
 			if a.diagnose.Parent().IndexOfChild(a.verify) < 0 {
 				a.diagnose.Parent().AddChild(a.verify)
 			}
@@ -276,7 +318,11 @@ func (a *app) fix() {
 	}()
 }
 func (a *app) finishError(err error) {
-	unison.InvokeTask(func() { a.setBusy(false); a.output.SetText("操作未完成：\n" + err.Error()) })
+	unison.InvokeTask(func() {
+		a.setBusy(false)
+		a.setLog("操作未完成：" + err.Error())
+		unison.ErrorDialogWithMessage("操作未完成", "请查看操作记录了解失败原因和后续处理。")
+	})
 }
 func (a *app) restart() {
 	if a.busy {
@@ -329,7 +375,7 @@ func (a *app) verifyAfter() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	a.cancel = cancel
 	a.setBusy(true)
-	a.output.SetText("正在检查代理和重启后的网络配置……")
+	a.setLog("正在检查代理和重启后的网络配置……")
 	go func() {
 		defer cancel()
 		v, pe := proxy.Test(ctx, a.proxy)
@@ -337,7 +383,7 @@ func (a *app) verifyAfter() {
 		unison.InvokeTask(func() {
 			a.setBusy(false)
 			if e != nil {
-				a.output.SetText("复查未完成：" + e.Error())
+				a.setLog("复查未完成：" + e.Error())
 				return
 			}
 			ws, ok := r.WebSocket()
@@ -350,7 +396,7 @@ func (a *app) verifyAfter() {
 					verdict = "代理和 WebSocket 检查通过，但工具未确认桌面端重启。"
 				}
 			}
-			a.output.SetText(fmt.Sprintf("%s\n代理检查：%s（错误：%v）\n系统代理启用：%v（已识别：%v）\nWebSocket：%v，状态=%s，%s\n已确认旧实例退出并检测到新实例：%v\n\n%s\n\n应用是否完全就绪仍需确认；一次握手成功也不能保证长期稳定。", verdict, v, pe, enabled, known, ok, ws.Status, ws.Summary, a.restarted, r.Raw))
+			a.setLog(fmt.Sprintf("%s\n代理检查：%s（错误：%v）\n系统代理启用：%v（已识别：%v）\nWebSocket：%v，状态=%s，%s\n已确认旧实例退出并检测到新实例：%v\n\n%s\n\n应用是否完全就绪仍需确认；一次握手成功也不能保证长期稳定。", verdict, v, pe, enabled, known, ok, ws.Status, ws.Summary, a.restarted, r.Raw))
 		})
 	}()
 }
